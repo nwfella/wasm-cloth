@@ -1,0 +1,1172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wasm-cloth — Verlet cloth simulation solved in WebAssembly</title>
+<meta name="description" content="A 72×72 cloth mesh draping over a rotating sphere. Verlet integration, structural/shear/bend constraints and dynamic normal recalculation all run inside a hand-built WebAssembly module.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0e1a'/%3E%3Cpath d='M4 9c4 0 4 14 8 14s4-14 8-14 4 14 8 14' stroke='%2358e1ff' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#05070e;
+    --bg2:#080c17;
+    --ink:#e8f0ff;
+    --dim:#8fa2c4;
+    --line:rgba(120,170,255,.14);
+    --accent:#58e1ff;
+    --accent2:#ff5fa8;
+    --card:rgba(9,14,26,.78);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:radial-gradient(120% 90% at 50% 0%,#0b1224 0%,var(--bg) 55%,#02030a 100%);
+    color:var(--ink);font-family:var(--sans);overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  #stage{position:fixed;inset:0;display:flex;flex-direction:column}
+  #view{position:relative;flex:1 1 auto;min-height:0;overflow:hidden}
+  #gl{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+  #gl.dragging{cursor:grabbing}
+  #vignette{
+    position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(110% 80% at 50% 42%,transparent 40%,rgba(2,3,10,.55) 100%);
+    mix-blend-mode:multiply;
+  }
+
+  /* ── title ─────────────────────────────────────────────────────────────── */
+  #hud{position:absolute;top:0;left:0;padding:clamp(14px,2.4vw,30px);pointer-events:none;max-width:min(46ch,60vw)}
+  h1{
+    margin:0;font-size:clamp(20px,2.6vw,29px);letter-spacing:-.02em;font-weight:650;
+    display:flex;align-items:baseline;gap:.5ch;flex-wrap:wrap;
+  }
+  h1 .w{color:var(--accent)}
+  h1 .d{color:var(--dim);font-weight:400}
+  #sub{
+    margin:.5em 0 0;color:var(--dim);font-size:clamp(11.5px,1.15vw,13.5px);line-height:1.5;
+    max-width:42ch;
+  }
+  #badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:11px}
+  .badge{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;
+    padding:3px 7px;border:1px solid var(--line);border-radius:5px;color:var(--dim);
+    background:rgba(10,16,30,.55);backdrop-filter:blur(6px);
+  }
+  .badge b{color:var(--accent);font-weight:600}
+  .badge.warm b{color:var(--accent2)}
+
+  /* ── stats ─────────────────────────────────────────────────────────────── */
+  #stats{
+    position:absolute;left:0;bottom:0;margin:clamp(12px,2.2vw,26px);pointer-events:none;
+    display:grid;grid-template-columns:repeat(4,auto);gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:9px;overflow:hidden;
+    backdrop-filter:blur(9px);
+  }
+  #stats .cell{background:rgba(7,11,21,.82);padding:7px 12px;min-width:74px}
+  #stats .k{font-family:var(--mono);font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:#6b7fa6}
+  #stats .v{font-family:var(--mono);font-size:13.5px;margin-top:2px;color:var(--ink);font-variant-numeric:tabular-nums}
+  #stats .v u{text-decoration:none;color:#5d6f92;font-size:10px;margin-left:2px}
+
+  /* ── controls ──────────────────────────────────────────────────────────── */
+  #panel{
+    position:absolute;top:0;right:0;bottom:0;width:274px;padding:clamp(12px,2vw,22px);
+    display:flex;flex-direction:column;gap:12px;overflow-y:auto;overscroll-behavior:contain;
+    pointer-events:auto;scrollbar-width:thin;
+  }
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:13px 14px;backdrop-filter:blur(11px);
+    box-shadow:0 18px 44px -28px #000;
+  }
+  .card h2{
+    margin:0 0 11px;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:#7288b3;font-weight:600;
+    display:flex;justify-content:space-between;align-items:center;
+  }
+  .row{margin-bottom:11px}
+  .row:last-child{margin-bottom:0}
+  .lab{display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;color:#b9c8e4;margin-bottom:5px}
+  .lab output{font-family:var(--mono);font-size:11px;color:var(--accent);font-variant-numeric:tabular-nums}
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;width:100%;height:16px;background:transparent;margin:0;display:block;cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:2px;background:rgba(120,170,255,.18)}
+  input[type=range]::-moz-range-track{height:3px;border-radius:2px;background:rgba(120,170,255,.18)}
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:12px;height:12px;border-radius:50%;margin-top:-4.5px;
+    background:linear-gradient(180deg,#c9f4ff,#3fc7ea);border:0;box-shadow:0 0 0 3px rgba(88,225,255,.16);
+  }
+  input[type=range]::-moz-range-thumb{
+    width:12px;height:12px;border:0;border-radius:50%;
+    background:linear-gradient(180deg,#c9f4ff,#3fc7ea);box-shadow:0 0 0 3px rgba(88,225,255,.16);
+  }
+  input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 5px rgba(88,225,255,.3)}
+  .btnrow{display:flex;gap:6px;flex-wrap:wrap}
+  button{
+    font-family:var(--sans);font-size:11.5px;color:#c3d2ec;background:rgba(88,225,255,.06);
+    border:1px solid var(--line);border-radius:7px;padding:6px 10px;cursor:pointer;
+    transition:background .16s,color .16s,border-color .16s;flex:1 1 auto;min-width:0;
+    white-space:nowrap;
+  }
+  button:hover{background:rgba(88,225,255,.13);color:#eaf6ff;border-color:rgba(88,225,255,.3)}
+  button[aria-pressed=true]{background:rgba(88,225,255,.19);color:#eaf7ff;border-color:rgba(88,225,255,.5)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .seg{display:flex;gap:4px}
+  .seg button{padding:5px 0;font-family:var(--mono);font-size:11px}
+  .note{font-size:10.5px;color:#66799c;line-height:1.5;margin:9px 0 0}
+  .note code{font-family:var(--mono);color:#8fb6e8}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  #banner{
+    position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;
+    font-size:13px;color:#cfdcf3;background:rgba(9,14,26,.92);border:1px solid var(--line);
+    padding:16px 22px;border-radius:11px;max-width:min(90vw,460px);line-height:1.6;
+    backdrop-filter:blur(8px);
+  }
+  #banner.err{border-color:rgba(255,95,168,.5);color:#ffc9dd}
+  #banner[hidden]{display:none}
+  #banner .small{font-family:var(--mono);font-size:10.5px;color:#7d90b4;margin-top:8px}
+
+  /* ── narrow screens ────────────────────────────────────────────────────── */
+  @media (max-width:760px){
+    /* a bottom sheet: static positioning made the panel an in-flow block that
+       covered the <h1> and pushed the canvas off the top of the screen */
+    #panel{
+      position:absolute;left:0;right:0;top:auto;bottom:52px;width:auto;
+      max-height:34vh;overflow-y:auto;padding:9px 9px 11px;
+      border-top:1px solid var(--line);background:rgba(5,8,16,.93);
+      backdrop-filter:blur(10px);
+      display:grid;grid-template-columns:1fr 1fr;gap:7px;align-content:start;
+    }
+    .card{padding:10px 11px}
+    #hud{max-width:100%;padding:12px}
+    #sub{display:none}
+    #stats{
+      grid-template-columns:repeat(4,1fr);margin:0;left:0;right:0;bottom:0;
+      border-radius:0;border-left:0;border-right:0;border-bottom:0;
+      padding-bottom:env(safe-area-inset-bottom,0px);
+    }
+    #stats .cell{padding:4px 6px;min-width:0;line-height:1.25}
+    #stats .v{font-size:12px}
+    #badges{display:none}
+    .fit-card{grid-column:1/-1}
+  }
+  @media (max-width:400px){
+    #stats .k{font-size:8px}
+    #stats .v{font-size:11px}
+    .lab{font-size:11px}
+  }
+  @media (prefers-reduced-motion:reduce){ *{animation:none!important;transition:none!important} }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="view">
+    <canvas id="gl" aria-label="3D cloth simulation draping over a rotating sphere"></canvas>
+    <div id="vignette"></div>
+
+    <header id="hud">
+      <h1><span class="w">wasm</span><span class="d">·</span><span>cloth</span></h1>
+      <p id="sub">Verlet integration, structural / shear / bend constraints and per-frame normal
+        recalculation — every vertex, every constraint, solved inside a WebAssembly module.
+        JavaScript only uploads the buffers.</p>
+      <div id="badges">
+        <span class="badge">mesh <b id="b-grid">72×72</b></span>
+        <span class="badge">constraints <b id="b-cons">30,386</b></span>
+        <span class="badge">wasm <b id="b-size">8.9 KB</b></span>
+        <span class="badge warm">gauss–seidel <b id="b-iters">6</b>×</span>
+      </div>
+    </header>
+
+    <div id="stats">
+      <div class="cell"><div class="k">fps</div><div class="v" id="s-fps">–</div></div>
+      <div class="cell"><div class="k">sim step</div><div class="v" id="s-ms">–<u>ms</u></div></div>
+      <div class="cell"><div class="k">vertices</div><div class="v" id="s-verts">–</div></div>
+      <div class="cell"><div class="k">contacts</div><div class="v" id="s-hits">–</div></div>
+    </div>
+
+    <aside id="panel">
+      <div class="card">
+        <h2>Fabric <span id="preset-tag" style="color:#5d7396">silk</span></h2>
+        <div class="row">
+          <label class="lab" for="c-wind">wind <output id="o-wind">0.55</output></label>
+          <input type="range" id="c-wind" min="0" max="2.5" step="0.01" value="0.55">
+        </div>
+        <div class="row">
+          <label class="lab" for="c-grav">gravity <output id="o-grav">9.2</output></label>
+          <input type="range" id="c-grav" min="0" max="20" step="0.1" value="9.2">
+        </div>
+        <div class="row">
+          <label class="lab" for="c-bend">bend stiffness <output id="o-bend">0.30</output></label>
+          <input type="range" id="c-bend" min="0" max="1" step="0.01" value="0.3">
+        </div>
+        <div class="row">
+          <label class="lab" for="c-iters">solver iterations <output id="o-iters">6</output></label>
+          <input type="range" id="c-iters" min="2" max="12" step="1" value="6">
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Obstacle</h2>
+        <div class="row">
+          <label class="lab" for="c-rad">sphere radius <output id="o-rad">0.52</output></label>
+          <input type="range" id="c-rad" min="0.3" max="0.95" step="0.01" value="0.52">
+        </div>
+        <div class="btnrow">
+          <button id="b-sphere" aria-pressed="true">sphere on</button>
+          <button id="b-orbit" aria-pressed="true">auto-orbit</button>
+        </div>
+      </div>
+
+      <div class="card fit-card">
+        <h2>Mesh <span style="color:#5d7396">wasm rebuild</span></h2>
+        <div class="seg" id="res">
+          <button data-res="64" aria-pressed="false">64²</button>
+          <button data-res="72" aria-pressed="true">72²</button>
+          <button data-res="88" aria-pressed="false">88²</button>
+          <button data-res="96" aria-pressed="false">96²</button>
+        </div>
+        <div class="btnrow" style="margin-top:8px">
+          <button id="b-pin">pin: corners</button>
+          <button id="b-wire" aria-pressed="false">mesh</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Playback</h2>
+        <div class="btnrow">
+          <button id="b-pause" aria-pressed="false">pause</button>
+          <button id="b-reset">reset</button>
+        </div>
+        <p class="note">Drag to orbit · scroll to zoom. Solver source:
+          <a href="https://github.com/nwfella/wasm-cloth/blob/main/src/cloth.ts" id="src-link">src/cloth.ts</a>.</p>
+      </div>
+    </aside>
+
+    <div id="banner" hidden>loading WebAssembly module…</div>
+  </div>
+</div>
+
+<!--WASM-B64--><script id="wasm-b64" type="text/plain">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</script><!--/WASM-B64-->
+
+<script>
+"use strict";
+(function () {
+  /* ═════════════════════════════════════════════════════════════════════════
+     scene state — one source of truth for the UI, the wasm solver and the gate
+     ═════════════════════════════════════════════════════════════════════════ */
+  const S = {
+    res: 72,               // grid is res x res vertices (>= 64x64 per spec)
+    span: 2.8,             // world width of the sheet
+    pinY: 1.15,
+    gravity: 9.2,
+    wind: 0.55,
+    windFreq: 2.1,
+    drag: 0.982,
+    iters: 6,
+    kBend: 0.30,
+    kShear: 0.78,
+    kStruct: 1.0,
+    floorY: -1.35,
+    sphereOn: true,
+    sphereR: 0.52,
+    pinMode: 0,            // 0 = four corner blocks, 1 = border frame
+    wire: false,
+    autoOrbit: true,
+    paused: false,
+  };
+
+  const FIXED_DT = 1 / 60;      // sim timestep (s)
+  const MAX_SUBSTEPS = 2;
+
+  /* Sphere path. Pure function of time: the renderer AND the wasm collider read
+     the same value each step, so the visible sphere is exactly the collider. */
+  function sphereAt(t) {
+    const r = S.sphereR;
+    // Placement is measured, not guessed: with a 4-corner hammock the fabric
+    // sags to y ≈ -0.35 in the middle, so a ball orbiting at y ≈ 0.5 floats in
+    // the basin and only grazes it. At y ≈ 0.2 the ball sits in the drape and
+    // the sheet wraps it on every frame (100% contact, ~370 vertices).
+    return {
+      x: 0.38 * Math.sin(t * 0.42),
+      y: 0.34 + 0.09 * Math.sin(t * 0.29 + 0.7),
+      z: 0.38 * Math.cos(t * 0.42),
+      r: r,
+    };
+  }
+
+  /* ── tiny mat4 / vec3 helpers (column-major, gl order) ─────────────────── */
+  function perspective(fovy, aspect, near, far) {
+    const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+    return new Float32Array([
+      f / aspect, 0, 0, 0,
+      0, f, 0, 0,
+      0, 0, (far + near) * nf, -1,
+      0, 0, 2 * far * near * nf, 0,
+    ]);
+  }
+  function lookAt(eye, center, up) {
+    let zx = eye[0] - center[0], zy = eye[1] - center[1], zz = eye[2] - center[2];
+    let l = Math.hypot(zx, zy, zz) || 1; zx /= l; zy /= l; zz /= l;
+    let xx = up[1] * zz - up[2] * zy, xy = up[2] * zx - up[0] * zz, xz = up[0] * zy - up[1] * zx;
+    l = Math.hypot(xx, xy, xz) || 1; xx /= l; xy /= l; xz /= l;
+    const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+    return new Float32Array([
+      xx, yx, zx, 0,
+      xy, yy, zy, 0,
+      xz, yz, zz, 0,
+      -(xx * eye[0] + xy * eye[1] + xz * eye[2]),
+      -(yx * eye[0] + yy * eye[1] + yz * eye[2]),
+      -(zx * eye[0] + zy * eye[1] + zz * eye[2]),
+      1,
+    ]);
+  }
+  function mul(a, b) {
+    const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++) {
+      for (let r = 0; r < 4; r++) {
+        o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+      }
+    }
+    return o;
+  }
+  const BG = [0.0196, 0.0275, 0.0549];
+
+  function fmt(n) {
+    const s = Math.round(n).toString();
+    return s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  /* ── dom refs ──────────────────────────────────────────────────────────── */
+  const $ = (id) => document.getElementById(id);
+  const canvas = $("gl");
+  const banner = $("banner");
+
+  /* ═════════════════════════════════════════════════════════════════════════
+     1. WebAssembly module
+     ═════════════════════════════════════════════════════════════════════════ */
+  const b64 = ($("wasm-b64").textContent || "").trim();
+  let wasmBytes = 0;
+
+  function decodeBase64(str) {
+    const bin = atob(str);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  let sim = null;          // wasm exports
+  let views = null;        // Float32Array views over wasm memory
+
+  function bootWasm() {
+    const bytes = decodeBase64(b64);
+    wasmBytes = bytes.length;
+    const imports = {
+      env: {
+        abort(msg, file, line, col) {
+          throw new Error("wasm abort at " + line + ":" + col);
+        },
+      },
+    };
+    return WebAssembly.instantiate(bytes, imports).then((res) => {
+      sim = (res.instance || res).exports;
+      if (typeof sim.init !== "function") throw new Error("wasm module missing exports");
+      buildMesh();
+      return sim;
+    });
+  }
+
+  function buildMesh() {
+    const n = S.res;
+    const spacing = S.span / (n - 1);
+    sim.init(n, n, spacing, S.pinY);
+    sim.setPinMode(S.pinMode);
+    syncPhysics();
+    refreshViews();
+    glMeshRebuild();
+    updateBadges();
+  }
+
+  function syncPhysics() {
+    sim.setPhysics(S.gravity, S.drag, S.wind, S.windFreq, S.iters,
+      S.kStruct, S.kShear, S.kBend, S.floorY);
+  }
+
+  /* Views are re-derived whenever wasm memory can have moved (after init). */
+  function refreshViews() {
+    const buf = sim.memory.buffer;
+    const nv = sim.getVertexCount();
+    views = {
+      pos: new Float32Array(buf, sim.posPtr(), nv * 4),
+      norm: new Float32Array(buf, sim.normPtr(), nv * 4),
+      uv: new Float32Array(buf, sim.uvPtr(), nv * 2),
+      idx: new Uint16Array(buf, sim.idxPtr(), sim.getIndexCount()),
+      nv, ni: sim.getIndexCount(),
+    };
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════════
+     2. WebGL
+     ═════════════════════════════════════════════════════════════════════════ */
+  const gl = canvas.getContext("webgl2", {
+    antialias: true, alpha: false, depth: true, powerPreference: "high-performance",
+    preserveDrawingBuffer: true,
+  });
+
+  const CLOTH_VS = `#version 300 es
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+layout(location=2) in vec2 aUv;
+uniform mat4 uVP;
+uniform vec3 uEye;
+uniform float uNormalOffset;
+out vec3 vWorld; out vec3 vNormal; out vec2 vUv;
+void main(){
+  vWorld = aPos;
+  vNormal = aNormal;
+  vUv = aUv;
+  // offset toward the camera, NOT along the normal: cloth normals are two-sided,
+  // so a normal-offset pushes half the lines behind the surface they trace and
+  // the overlay z-fights itself into invisibility
+  vec3 pull = normalize(uEye - aPos) * uNormalOffset;
+  gl_Position = uVP * vec4(aPos + pull, 1.0);
+}`;
+
+  const CLOTH_FS = `#version 300 es
+precision highp float;
+in vec3 vWorld; in vec3 vNormal; in vec2 vUv;
+uniform vec3 uEye; uniform vec3 uKey; uniform vec3 uBg;
+uniform float uWeave; uniform float uFog; uniform float uFlat;
+out vec4 outColor;
+
+void main(){
+  vec3 N = normalize(vNormal);
+  if(!gl_FrontFacing) N = -N;              // cloth is two-sided
+  vec3 V = normalize(uEye - vWorld);
+  vec3 L = normalize(uKey);
+  vec3 H = normalize(L + V);
+
+  // half-lambert: fabric scatters, so no hard terminator
+  float wrap = clamp(dot(N, L) * 0.5 + 0.5, 0.0, 1.0);
+  float diff = pow(wrap, 1.5);
+
+  // fine weave cross-hatch — reads as cloth at close range, invisible at rest
+  float weave = sin(vUv.x * uWeave * 6.2831853) * sin(vUv.y * uWeave * 6.2831853);
+
+  float spec = pow(max(dot(N, H), 0.0), 30.0);
+  float fres = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.7);
+  // anisotropic-ish sheen along the fold direction
+  float sheen = pow(1.0 - abs(dot(N, V)), 4.0) * 0.5;
+
+  // a second, cool fill from the opposite side. Without it the underside of a
+  // fold goes black and the fabric reads as a hole cut in the scene.
+  float fill = pow(clamp(dot(N, -L) * 0.5 + 0.5, 0.0, 1.0), 2.0);
+  vec3 base = mix(vec3(0.035,0.050,0.125), vec3(0.16,0.35,0.63), diff);
+  vec3 col = base * (0.40 + 1.00 * diff);
+  col += vec3(0.10,0.16,0.30) * fill * 0.55;
+  col += vec3(0.30,0.78,1.00) * spec * 0.42;
+  col += vec3(0.95,0.42,0.72) * fres * 0.46;
+  col += vec3(0.20,0.45,0.75) * sheen * 0.28;
+  col *= 0.972 + 0.055 * weave;
+  col += vec3(0.06,0.03,0.10) * smoothstep(-0.2, 1.3, vWorld.y);
+  col = mix(col, mix(col, uBg, 0.6), uFlat);
+  col = mix(col, uBg, clamp(length(vWorld - uEye) * uFog, 0.0, 0.66));
+  outColor = vec4(col, 1.0);
+}`;
+
+  const SPHERE_VS = `#version 300 es
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+uniform mat4 uVP; uniform vec3 uCenter; uniform float uRadius;
+out vec3 vWorld; out vec3 vNormal; out vec3 vLocal;
+void main(){
+  vLocal = aPos;
+  vWorld = uCenter + aPos * uRadius;
+  vNormal = aNormal;
+  gl_Position = uVP * vec4(vWorld, 1.0);
+}`;
+
+  const SPHERE_FS = `#version 300 es
+precision highp float;
+in vec3 vWorld; in vec3 vNormal; in vec3 vLocal;
+uniform vec3 uEye; uniform vec3 uBg; uniform vec3 uKey; uniform float uTime;
+out vec4 outColor;
+void main(){
+  vec3 N = normalize(vNormal);
+  vec3 V = normalize(uEye - vWorld);
+  vec3 L = normalize(uKey);
+  vec3 H = normalize(L + V);
+  // two bold latitude bands that spin with the obstacle — rotation has to be
+  // legible from a still frame, which a high-frequency pattern cannot do
+  float ang = atan(vLocal.z, vLocal.x) + uTime * 0.9;
+  float band = sin(vLocal.y * 5.0 + ang * 1.3);
+  float stripe = smoothstep(0.15, 0.55, band);
+  float diff = clamp(dot(N, L) * 0.5 + 0.5, 0.0, 1.0);
+  float spec = pow(max(dot(N, H), 0.0), 42.0);
+  float fres = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);
+  vec3 tint = mix(vec3(0.085,0.105,0.145), vec3(0.30,0.36,0.46), stripe);
+  vec3 col = tint * (0.70 + 1.05 * diff);
+  col += vec3(1.0) * spec * 0.90;
+  col += vec3(0.34,0.84,1.0) * fres * 0.75;
+  col = mix(col, uBg, clamp(length(vWorld - uEye) * 0.045, 0.0, 0.6));
+  outColor = vec4(col, 1.0);
+}`;
+
+  const GROUND_VS = `#version 300 es
+layout(location=0) in vec3 aPos;
+uniform mat4 uVP;
+out vec3 vWorld;
+void main(){ vWorld = aPos; gl_Position = uVP * vec4(aPos, 1.0); }`;
+
+  const GROUND_FS = `#version 300 es
+precision highp float;
+in vec3 vWorld;
+uniform vec3 uEye; uniform vec3 uBg; uniform vec2 uShadow; uniform float uShadowR;
+out vec4 outColor;
+void main(){
+  float d = length(vWorld.xz);
+  float fade = 1.0 - smoothstep(1.5, 9.5, d);
+  vec2 g = abs(fract(vWorld.xz * 2.0) - 0.5) / fwidth(vWorld.xz * 2.0);
+  float line = 1.0 - min(min(g.x, g.y), 1.0);
+  vec3 col = mix(uBg, vec3(0.10,0.20,0.34), 0.55 * fade);
+  col += vec3(0.18,0.42,0.62) * line * 0.30 * fade;
+  float sd = length(vWorld.xz - uShadow);
+  float sh = smoothstep(uShadowR * 2.6, uShadowR * 0.25, sd);
+  col *= 1.0 - 0.72 * sh;
+  col = mix(col, uBg, clamp(length(vWorld - uEye) * 0.05, 0.0, 0.85));
+  outColor = vec4(col, 1.0);
+}`;
+
+  function compile(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      throw new Error("shader: " + gl.getShaderInfoLog(sh) + "\n" + src);
+    }
+    return sh;
+  }
+  function program(vs, fs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      throw new Error("link: " + gl.getProgramInfoLog(p));
+    }
+    return p;
+  }
+
+  let progCloth, progSphere, progGround, progWire;
+  const U = {};         // uniform locations, keyed by name
+  let vaoCloth, vaoSphere, vaoGround, vaoWire;
+  let bufPos, bufNorm, bufUv, bufIdx, bufWire;
+  let meshVerts = 0, meshTris = 0, meshEdges = 0;
+
+  function initGL() {
+    progCloth = program(CLOTH_VS, CLOTH_FS);
+    progSphere = program(SPHERE_VS, SPHERE_FS);
+    progGround = program(GROUND_VS, GROUND_FS);
+    progWire = program(CLOTH_VS, `#version 300 es
+precision highp float;
+in vec3 vWorld; in vec3 vNormal; in vec2 vUv;
+uniform vec3 uEye; uniform vec3 uBg;
+out vec4 outColor;
+void main(){
+  float d = length(vWorld - uEye);
+  vec3 col = vec3(0.62,0.92,1.0);
+  col = mix(col, uBg, clamp(d * 0.06, 0.0, 0.70));
+  outColor = vec4(col, 0.62 * (1.0 - clamp(d * 0.05, 0.0, 0.55)));
+}`);
+
+    // KEY THE TABLE BY NAME, NOT BY PROGRAM OBJECT: WebGLProgram stringifies to
+    // "[object WebGLProgram]", so using it as an object key makes all four
+    // programs share one entry — every uniform call then targets the wrong
+    // program, silently, and the scene renders black.
+    const tables = [
+      ["cloth", progCloth, ["uVP", "uEye", "uKey", "uBg", "uWeave", "uFog", "uFlat", "uNormalOffset"]],
+      ["sphere", progSphere, ["uVP", "uEye", "uBg", "uKey", "uCenter", "uRadius", "uTime"]],
+      ["ground", progGround, ["uVP", "uEye", "uBg", "uShadow", "uShadowR"]],
+      ["wire", progWire, ["uVP", "uEye", "uBg", "uNormalOffset"]],
+    ];
+    for (const [key, prog, names] of tables) {
+      U[key] = {};
+      for (const n of names) U[key][n] = gl.getUniformLocation(prog, n);
+    }
+
+    // ── cloth geometry ────────────────────────────────────────────────────
+    vaoCloth = gl.createVertexArray();
+    gl.bindVertexArray(vaoCloth);
+    bufPos = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufPos);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4 * 96 * 96, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 16, 0);
+
+    bufNorm = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufNorm);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4 * 96 * 96, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 16, 0);
+
+    bufUv = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufUv);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 8, 0);
+
+    bufIdx = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufIdx);
+
+    // wireframe uses its own VAO over the same position/normal buffers
+    vaoWire = gl.createVertexArray();
+    gl.bindVertexArray(vaoWire);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufPos);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 16, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufNorm);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 16, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufUv);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 8, 0);
+    bufWire = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufWire);
+
+    gl.bindVertexArray(null);
+
+    // ── sphere ────────────────────────────────────────────────────────────
+    const sphere = sphereMesh(72, 44);
+    vaoSphere = gl.createVertexArray();
+    gl.bindVertexArray(vaoSphere);
+    const sb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, sb);
+    gl.bufferData(gl.ARRAY_BUFFER, sphere.data, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+    const sib = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sib);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, sphere.idx, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    sphereCount = sphere.idx.length;
+
+    // ── ground ────────────────────────────────────────────────────────────
+    const g = new Float32Array([
+      -14, S.floorY, -14, 14, S.floorY, -14, 14, S.floorY, 14,
+      -14, S.floorY, -14, 14, S.floorY, 14, -14, S.floorY, 14,
+    ]);
+    vaoGround = gl.createVertexArray();
+    gl.bindVertexArray(vaoGround);
+    const gb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, gb);
+    gl.bufferData(gl.ARRAY_BUFFER, g, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 12, 0);
+    gl.bindVertexArray(null);
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.disable(gl.CULL_FACE);          // cloth is two-sided
+    gl.clearColor(BG[0], BG[1], BG[2], 1);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  }
+
+  let sphereCount = 0;
+  function sphereMesh(seg, ring) {
+    const verts = [], idx = [];
+    for (let y = 0; y <= ring; y++) {
+      const v = y / ring, phi = v * Math.PI;
+      for (let x = 0; x <= seg; x++) {
+        const u = x / seg, th = u * Math.PI * 2;
+        const nx = Math.sin(phi) * Math.cos(th), ny = Math.cos(phi), nz = Math.sin(phi) * Math.sin(th);
+        verts.push(nx, ny, nz, nx, ny, nz);
+      }
+    }
+    for (let y = 0; y < ring; y++) {
+      for (let x = 0; x < seg; x++) {
+        const a = y * (seg + 1) + x, b = a + seg + 1;
+        idx.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    }
+    return { data: new Float32Array(verts), idx: new Uint16Array(idx) };
+  }
+
+  /* upload wasm buffers + rebuild the static index/uv/edge buffers */
+  function glMeshRebuild() {
+    const n = S.res;
+    meshVerts = views.nv;
+    meshTris = views.ni / 3;
+
+    gl.bindVertexArray(null);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufUv);
+    gl.bufferData(gl.ARRAY_BUFFER, views.uv, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufIdx);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, views.idx, gl.STATIC_DRAW);
+
+    // wireframe edges: one horizontal + one vertical edge per cell
+    const edges = [];
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        const i = r * n + c;
+        if (c + 1 < n) edges.push(i, i + 1);
+        if (r + 1 < n) edges.push(i, i + n);
+      }
+    }
+    meshEdges = edges.length / 2;
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufWire);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(edges), gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+  }
+
+  function uploadMesh() {
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufPos);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, views.pos);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufNorm);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, views.norm);
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════════
+     3. camera + input
+     ═════════════════════════════════════════════════════════════════════════ */
+  const cam = { yaw: 0.62, pitch: 0.52, dist: 4.85, target: [0, 0.55, 0] };
+  let dragging = false, lastX = 0, lastY = 0, userTouched = 0;
+  let effDist = cam.dist;
+
+  // The scene has a bounded radius; on a portrait viewport the HORIZONTAL half
+  // angle is the binding constraint, so a fixed distance crops the sheet. Take
+  // the smaller half-angle and derive the distance that actually fits it.
+  // Fitting the WHOLE sheet on a desktop aspect would push the camera back to
+  // a distance that makes the fabric small; the desktop framing crops the far
+  // corners on purpose. On a portrait viewport the width is the binding
+  // constraint, so back off — just not far enough to shrink the subject away.
+  function fitDist(aspect) {
+    const vHalf = (38 * Math.PI / 180) / 2;
+    const hHalf = Math.atan(Math.tan(vHalf) * Math.max(aspect, 0.25));
+    const radius = aspect < 0.9 ? 1.12 : 1.45;
+    return radius / Math.sin(Math.min(vHalf, hHalf) * 0.94);
+  }
+
+  function eyePos() {
+    const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    return [
+      cam.target[0] + effDist * cp * Math.sin(cam.yaw),
+      cam.target[1] + effDist * sp,
+      cam.target[2] + effDist * cp * Math.cos(cam.yaw),
+    ];
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add("dragging");
+    userTouched = performance.now();
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    cam.yaw -= dx * 0.0055;
+    cam.pitch = Math.max(-0.12, Math.min(1.32, cam.pitch + dy * 0.0045));
+    userTouched = performance.now();
+  });
+  const endDrag = (e) => {
+    dragging = false;
+    canvas.classList.remove("dragging");
+    if (e && e.pointerId != null && canvas.hasPointerCapture(e.pointerId)) {
+      canvas.releasePointerCapture(e.pointerId);
+    }
+  };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    cam.dist = Math.max(2.1, Math.min(11, cam.dist * (1 + Math.sign(e.deltaY) * 0.075)));
+    userTouched = performance.now();
+  }, { passive: false });
+  canvas.addEventListener("dblclick", () => {
+    cam.yaw = 0.62; cam.pitch = 0.52; cam.dist = 4.85;
+  });
+
+  /* ═════════════════════════════════════════════════════════════════════════
+     4. resize (idempotent — the canvas is absolutely positioned, so it can
+        never feed its own size back into the layout)
+     ═════════════════════════════════════════════════════════════════════════ */
+  let vw = 1, vh = 1, dpr = 1;
+  function fit() {
+    const host = $("view");
+    const w = Math.max(1, host.clientWidth), h = Math.max(1, host.clientHeight);
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const pw = Math.round(w * dpr), ph = Math.round(h * dpr);
+    if (canvas.width !== pw || canvas.height !== ph) {
+      canvas.width = pw; canvas.height = ph;
+    }
+    vw = w; vh = h;
+    gl.viewport(0, 0, pw, ph);
+  }
+  window.addEventListener("resize", fit);
+
+  /* ═════════════════════════════════════════════════════════════════════════
+     5. simulation + render
+     ═════════════════════════════════════════════════════════════════════════ */
+  let simTime = 0, accumulator = 0, steps = 0;
+  let simMs = 0, fps = 0, lastFrame = 0, frames = 0;
+  let lastSphere = sphereAt(0);
+
+  function stepSim(dt) {
+    lastSphere = sphereAt(simTime + dt);
+    sim.setSphere(lastSphere.x, lastSphere.y, lastSphere.z, lastSphere.r, S.sphereOn ? 1 : 0);
+    const t0 = performance.now();
+    sim.step(dt, simTime + dt);
+    simMs = simMs * 0.9 + (performance.now() - t0) * 0.1;
+    simTime += dt;
+    steps++;
+  }
+
+  // On a phone the controls cover the bottom of the viewport, so the geometry's
+  // centre and the visible area's centre are different points. Aim slightly
+  // BELOW the subject and it rises into the uncovered strip.
+  function coveredFraction() {
+    if (!window.matchMedia("(max-width: 760px)").matches) return 0;
+    const viewH = $("view").getBoundingClientRect().height || vh;
+    const panelH = $("panel").getBoundingClientRect().height;
+    return Math.min(0.55, (panelH + 52) / viewH);
+  }
+
+  function draw() {
+    const aspect = vw / vh;
+    effDist = Math.max(cam.dist, fitDist(aspect));
+    const shift = coveredFraction() * 0.5;
+    const aim = [
+      cam.target[0],
+      cam.target[1] - shift * 2 * effDist * Math.tan((38 * Math.PI / 180) / 2),
+      cam.target[2],
+    ];
+    const proj = perspective(38 * Math.PI / 180, aspect, 0.1, 60);
+    const eye = eyePos();
+    const vp = mul(proj, lookAt(eye, aim, [0, 1, 0]));
+    const key = [0.45, 0.86, 0.32];
+
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // ground
+    gl.useProgram(progGround);
+    gl.uniformMatrix4fv(U.ground.uVP, false, vp);
+    gl.uniform3fv(U.ground.uEye, eye);
+    gl.uniform3fv(U.ground.uBg, BG);
+    gl.uniform2f(U.ground.uShadow, lastSphere.x, lastSphere.z);
+    gl.uniform1f(U.ground.uShadowR, lastSphere.r);
+    gl.depthMask(false);
+    gl.bindVertexArray(vaoGround);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.depthMask(true);
+
+    // sphere obstacle
+    if (S.sphereOn) {
+      gl.useProgram(progSphere);
+      gl.uniformMatrix4fv(U.sphere.uVP, false, vp);
+      gl.uniform3fv(U.sphere.uEye, eye);
+      gl.uniform3fv(U.sphere.uBg, BG);
+      gl.uniform3fv(U.sphere.uKey, key);
+      gl.uniform3f(U.sphere.uCenter, lastSphere.x, lastSphere.y, lastSphere.z);
+      gl.uniform1f(U.sphere.uRadius, lastSphere.r);
+      gl.uniform1f(U.sphere.uTime, simTime);
+      gl.bindVertexArray(vaoSphere);
+      gl.drawElements(gl.TRIANGLES, sphereCount, gl.UNSIGNED_SHORT, 0);
+    }
+
+    // cloth
+    gl.useProgram(progCloth);
+    gl.uniformMatrix4fv(U.cloth.uVP, false, vp);
+    gl.uniform3fv(U.cloth.uEye, eye);
+    gl.uniform3fv(U.cloth.uKey, key);
+    gl.uniform3fv(U.cloth.uBg, BG);
+    gl.uniform1f(U.cloth.uWeave, S.res);
+    gl.uniform1f(U.cloth.uFog, 0.055);
+    gl.uniform1f(U.cloth.uFlat, 0);
+    gl.uniform1f(U.cloth.uNormalOffset, 0.0);
+    gl.bindVertexArray(vaoCloth);
+    gl.drawElements(gl.TRIANGLES, views.ni, gl.UNSIGNED_SHORT, 0);
+
+    // wireframe overlay
+    if (S.wire) {
+      gl.useProgram(progWire);
+      gl.uniformMatrix4fv(U.wire.uVP, false, vp);
+      gl.uniform3fv(U.wire.uEye, eye);
+      gl.uniform3fv(U.wire.uBg, BG);
+      gl.uniform1f(U.wire.uNormalOffset, 0.012);
+      gl.depthMask(false);
+      gl.bindVertexArray(vaoWire);
+      gl.drawElements(gl.LINES, meshEdges * 2, gl.UNSIGNED_SHORT, 0);
+      gl.depthMask(true);
+    }
+    gl.bindVertexArray(null);
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════════
+     6. UI wiring
+     ═════════════════════════════════════════════════════════════════════════ */
+  function updateBadges() {
+    $("b-grid").textContent = S.res + "×" + S.res;
+    $("b-cons").textContent = fmt(sim.getConstraintCount());
+    $("b-size").textContent = (wasmBytes / 1024).toFixed(1) + " KB";
+    $("b-iters").textContent = String(S.iters);
+    $("o-wind").textContent = S.wind.toFixed(2);
+    $("o-grav").textContent = S.gravity.toFixed(1);
+    $("o-bend").textContent = S.kBend.toFixed(2);
+    $("o-iters").textContent = String(S.iters);
+    $("o-rad").textContent = S.sphereR.toFixed(2);
+    for (const b of document.querySelectorAll("#res button")) {
+      b.setAttribute("aria-pressed", String(+b.dataset.res === S.res));
+    }
+    $("b-pin").textContent = "pin: " + (S.pinMode ? "frame" : "corners");
+    // badges and the stats grid are two views of one state: refresh them in the
+    // same call, or a mesh rebuild leaves the stat cells reporting the old mesh
+    if (sim && views) renderStats();
+  }
+
+  function slider(id, key, after) {
+    const el = $(id);
+    const on = () => {
+      S[key] = parseFloat(el.value);
+      if (after) after();
+      syncPhysics();
+      updateBadges();
+    };
+    el.addEventListener("input", on);
+    return el;
+  }
+  slider("c-wind", "wind");
+  slider("c-grav", "gravity");
+  slider("c-bend", "kBend");
+  slider("c-iters", "iters");
+  slider("c-rad", "sphereR");
+
+  for (const b of document.querySelectorAll("#res button")) {
+    b.addEventListener("click", () => {
+      const r = +b.dataset.res;
+      if (r === S.res) return;
+      S.res = r;
+      buildMesh();
+      updateBadges();
+    });
+  }
+
+  $("b-pin").addEventListener("click", () => {
+    S.pinMode = S.pinMode ? 0 : 1;
+    sim.setPinMode(S.pinMode);
+    updateBadges();
+  });
+  $("b-sphere").addEventListener("click", (e) => {
+    S.sphereOn = !S.sphereOn;
+    e.currentTarget.setAttribute("aria-pressed", String(S.sphereOn));
+    e.currentTarget.textContent = S.sphereOn ? "sphere on" : "sphere off";
+  });
+  $("b-orbit").addEventListener("click", (e) => {
+    S.autoOrbit = !S.autoOrbit;
+    e.currentTarget.setAttribute("aria-pressed", String(S.autoOrbit));
+  });
+  $("b-wire").addEventListener("click", (e) => {
+    S.wire = !S.wire;
+    e.currentTarget.setAttribute("aria-pressed", String(S.wire));
+  });
+  $("b-pause").addEventListener("click", (e) => {
+    S.paused = !S.paused;
+    e.currentTarget.setAttribute("aria-pressed", String(S.paused));
+    e.currentTarget.textContent = S.paused ? "play" : "pause";
+  });
+  $("b-reset").addEventListener("click", () => {
+    sim.reset();
+    simTime = 0; accumulator = 0;
+    lastSphere = sphereAt(0);
+  });
+
+  function renderStats() {
+    $("s-fps").textContent = fps ? Math.round(fps) : "–";
+    $("s-ms").innerHTML = (simMs < 10 ? simMs.toFixed(2) : simMs.toFixed(1)) + "<u>ms</u>";
+    $("s-verts").textContent = fmt(views.nv);
+    $("s-hits").textContent = fmt(sim.getHitCount());
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════════
+     7. frame loop
+     ═════════════════════════════════════════════════════════════════════════ */
+  const PROBE = /[?&]probe=1/.test(location.search);
+
+  function frame(now) {
+    if (!lastFrame) lastFrame = now;
+    const dtReal = Math.min((now - lastFrame) / 1000, 0.1);
+    lastFrame = now;
+    frames++;
+
+    if (S.autoOrbit && !dragging && now - userTouched > 2200) cam.yaw += dtReal * 0.085;
+
+    if (!S.paused) {
+      accumulator += dtReal;
+      let n = 0;
+      while (accumulator >= FIXED_DT && n < MAX_SUBSTEPS) {
+        stepSim(FIXED_DT);
+        accumulator -= FIXED_DT;
+        n++;
+      }
+      if (accumulator > FIXED_DT * MAX_SUBSTEPS) accumulator = 0;
+    }
+
+    uploadMesh();
+    draw();
+    fps = fps ? fps * 0.92 + (1 / Math.max(dtReal, 1e-4)) * 0.08 : 1 / Math.max(dtReal, 1e-4);
+    if (frames % 6 === 0) renderStats();
+
+    if (PROBE && frames >= 20) {
+      document.title = "RENDER_OK " + JSON.stringify(probeReport());
+      return;
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function probeReport() {
+    return {
+      frames,
+      verts: views.nv,
+      tris: meshTris,
+      constraints: sim.getConstraintCount(),
+      wasmBytes,
+      simMs: +simMs.toFixed(2),
+      hits: sim.getHitCount(),
+      err: +sim.constraintError().toFixed(5),
+      extentY: +sim.extentY().toFixed(3),
+      title: document.title,
+    };
+  }
+
+  /* ═════════════════════════════════════════════════════════════════════════
+     8. boot
+     ═════════════════════════════════════════════════════════════════════════ */
+  window.addEventListener("error", (e) => {
+    banner.hidden = false;
+    banner.className = "err";
+    banner.innerHTML = "<b>Renderer error</b><div class='small'>" +
+      String(e.message || "").replace(/</g, "&lt;") + "</div>";
+  });
+
+  function fail(msg) {
+    banner.hidden = false;
+    banner.className = "err";
+    banner.innerHTML = "<b>This demo needs WebGL2 and WebAssembly.</b><div class='small'>" +
+      String(msg || "").replace(/</g, "&lt;") + "</div>";
+  }
+
+  if (!gl) {
+    fail("webgl2 context unavailable");
+    return;
+  }
+
+  try {
+    initGL();
+  } catch (err) {
+    fail(err.message);
+    return;
+  }
+
+  fit();
+  bootWasm().then(() => {
+    banner.hidden = true;
+    updateBadges();
+    renderStats();
+    requestAnimationFrame(frame);
+
+    /* test hook — the browser gate drives the same code the RAF loop drives */
+    window.ClothApp = {
+      state: S,
+      ready: true,
+      info() {
+        return {
+          verts: views.nv, tris: meshTris, edges: meshEdges,
+          constraints: sim.getConstraintCount(),
+          struct: sim.getStructCount(), shear: sim.getShearCount(), bend: sim.getBendCount(),
+          pinned: sim.getPinnedCount(), wasmBytes, cols: sim.getCols(),
+          glVersion: gl.getParameter(gl.VERSION),
+        };
+      },
+      /* advance the simulation synchronously, then upload (no RAF involved) */
+      advance(n) {
+        for (let i = 0; i < (n || 1); i++) stepSim(FIXED_DT);
+        uploadMesh();
+        return { simTime, steps, simMs: +simMs.toFixed(3), err: sim.constraintError(), hits: sim.getHitCount() };
+      },
+      render() { uploadMesh(); draw(); return frames; },
+      /* the requestAnimationFrame counter — proves the real loop runs, without
+         the gate having to drive it */
+      frameCount() { return frames; },
+      clock() { return { simTime: +simTime.toFixed(3), steps, paused: S.paused }; },
+      frame() { frames++; uploadMesh(); draw(); return frames; },
+      positions() { return Array.from(views.pos.slice(0, 48)); },
+      /* distance from the sphere centre to the nearest vertex: ≈ radius means
+         the collider is doing its job, < radius means a vertex is inside it */
+      sphereGap() { return sim.nearestToSphere(); },
+      simError() { return sim.constraintError(); },
+      extentY() { return sim.extentY(); },
+      pinned() { return sim.getPinnedCount(); },
+      hitCount() { return sim.getHitCount(); },
+      normals() { return Array.from(views.norm.slice(0, 48)); },
+      /* signature of the whole normal field: changes iff normals are recomputed */
+      normalHash() {
+        let h = 0;
+        const n = views.norm;
+        for (let i = 0; i < n.length; i += 4) {
+          h = (h * 31 + Math.round(n[i + 1] * 1e4)) | 0;
+        }
+        return h;
+      },
+      normalStats() {
+        let unit = 0, sumY = 0, n = 0;
+        for (let i = 0; i < views.norm.length; i += 4) {
+          const l = Math.hypot(views.norm[i], views.norm[i + 1], views.norm[i + 2]);
+          if (Math.abs(l - 1) < 1e-3) unit++;
+          sumY += views.norm[i + 1];
+          n++;
+        }
+        return { unit, n, sumY: +sumY.toFixed(3) };
+      },
+      setState(patch) {
+        Object.assign(S, patch);
+        if (patch.res && patch.res !== sim.getCols()) { buildMesh(); }
+        if (patch.pinMode !== undefined) sim.setPinMode(S.pinMode);
+        syncPhysics();
+        updateBadges();
+        for (const [id, key] of [["c-wind", "wind"], ["c-grav", "gravity"], ["c-bend", "kBend"], ["c-iters", "iters"], ["c-rad", "sphereR"]]) {
+          if (patch[key] !== undefined) $(id).value = String(S[key]);
+        }
+        return S;
+      },
+      camera() {
+        return { yaw: cam.yaw, pitch: cam.pitch, dist: cam.dist, effDist,
+          covered: +coveredFraction().toFixed(3), eye: eyePos() };
+      },
+      setCamera(p) { Object.assign(cam, p); },
+      dom() {
+        return {
+          grid: $("b-grid").textContent,
+          cons: $("b-cons").textContent,
+          size: $("b-size").textContent,
+          fps: $("s-fps").textContent,
+          ms: $("s-ms").textContent,
+          verts: $("s-verts").textContent,
+          hits: $("s-hits").textContent,
+          pin: $("b-pin").textContent,
+        };
+      },
+      stats() { return sim.getHitCount(); },
+      reset() { sim.reset(); simTime = 0; accumulator = 0; lastSphere = sphereAt(0); uploadMesh(); },
+      sphereAt,
+      probe() { return probeReport(); },
+    };
+  }).catch((err) => fail(err && err.message ? err.message : String(err)));
+})();
+</script>
+</body>
+</html>

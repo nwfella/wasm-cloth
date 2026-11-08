@@ -1,0 +1,495 @@
+#!/usr/bin/env node
+/**
+ * browser_check.js — tier 2 gate: drive a real Chrome over the DevTools
+ * Protocol and assert what the page actually rendered.
+ *
+ * No dependencies: Node's built-in fetch + global WebSocket are enough to speak
+ * CDP, so the repo stays zero-install for verification. WebGL is forced through
+ * SwiftShader (--enable-unsafe-swiftshader) so this runs on machines with no GPU.
+ *
+ * Usage:  node scripts/browser_check.js [--url=...] [--keep] [--slow]
+ */
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { spawn, spawnSync } = require("child_process");
+
+const ROOT = path.resolve(__dirname, "..");
+const OUT = path.join(ROOT, "screenshots");
+const argUrl = (process.argv.find((a) => a.startsWith("--url=")) || "").slice(6);
+const URL = argUrl || "file:///" + path.join(ROOT, "index.html").replace(/\\/g, "/");
+
+const CHROME_CANDIDATES = [
+  process.env.CHROME_BIN,
+  "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser",
+].filter(Boolean);
+
+let pass = 0, fail = 0;
+const fails = [];
+function section(n) { console.log(`\n\x1b[1m${n}\x1b[0m`); }
+function check(name, ok, detail) {
+  console.log(`  ${ok ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"}  ${name}` +
+    (detail ? `  \x1b[2m${detail}\x1b[0m` : ""));
+  if (ok) pass++; else { fail++; fails.push(name); }
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ── minimal CDP client ──────────────────────────────────────────────────── */
+class CDP {
+  constructor(ws) {
+    this.ws = ws;
+    this.id = 0;
+    this.pending = new Map();
+    this.exceptions = [];
+    this.consoleErrors = [];
+    this.logErrors = [];
+    ws.addEventListener("message", (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.id && this.pending.has(msg.id)) {
+        const { resolve, reject } = this.pending.get(msg.id);
+        this.pending.delete(msg.id);
+        msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
+        return;
+      }
+      if (msg.method === "Runtime.exceptionThrown") {
+        const d = msg.params.exceptionDetails;
+        this.exceptions.push((d.exception && d.exception.description) || d.text);
+      } else if (msg.method === "Runtime.consoleAPICalled" && msg.params.type === "error") {
+        this.consoleErrors.push(msg.params.args.map((a) => a.value ?? a.description ?? a.type).join(" "));
+      } else if (msg.method === "Log.entryAdded" && msg.params.entry.level === "error") {
+        this.logErrors.push(msg.params.entry.text + " " + (msg.params.entry.url || ""));
+      }
+    });
+  }
+  send(method, params = {}) {
+    const id = ++this.id;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      this.ws.send(JSON.stringify({ id, method, params }));
+      setTimeout(() => {
+        if (this.pending.has(id)) {
+          this.pending.delete(id);
+          reject(new Error(`CDP timeout: ${method}`));
+        }
+      }, 30000);
+    });
+  }
+  async eval(expr, awaitPromise = false) {
+    const r = await this.send("Runtime.evaluate", {
+      expression: `(() => { ${expr} })()`,
+      returnByValue: true,
+      awaitPromise,
+    });
+    if (r.exceptionDetails) {
+      throw new Error("page threw: " + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
+    }
+    return r.result.value;
+  }
+  /* serialise AFTER resolution — JSON.stringify(promise) is "{}" */
+  async evalAsync(expr) {
+    const r = await this.send("Runtime.evaluate", {
+      expression: `Promise.resolve((async () => { ${expr} })()).then(v => JSON.stringify(v))`,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+    if (r.exceptionDetails) {
+      throw new Error("page threw: " + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
+    }
+    return JSON.parse(r.result.value);
+  }
+  async waitFor(expr, ms = 20000, label = expr) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      try { if (await this.eval(`return !!(${expr})`)) return true; } catch { /* page may not be ready */ }
+      await sleep(100);
+    }
+    throw new Error(`waitFor timed out after ${ms}ms: ${label}`);
+  }
+  async shot(file, clip) {
+    const params = { format: "png", captureBeyondViewport: !!clip };
+    if (clip) params.clip = { ...clip, scale: 1 };
+    const r = await this.send("Page.captureScreenshot", params);
+    fs.writeFileSync(file, Buffer.from(r.data, "base64"));
+    return file;
+  }
+}
+
+function findChrome() {
+  for (const c of CHROME_CANDIDATES) if (fs.existsSync(c)) return c;
+  throw new Error("no Chrome found; set CHROME_BIN");
+}
+
+/* Kill the browser we spawned and its children, by PID only. A parent
+   chrome.exe kill on Windows leaves the profile locked, and deleting a locked
+   profile dir is what makes the next run die with EPERM. */
+function killTree(proc) {
+  if (!proc) return;
+  try {
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/F", "/PID", String(proc.pid), "/T"], { stdio: "ignore" });
+    } else {
+      proc.kill("SIGKILL");
+    }
+  } catch { /* already gone */ }
+}
+
+async function launch() {
+  const bin = findChrome();
+  // unique per launch: reusing a directory that a previous browser still holds
+  // open fails with EBUSY/EPERM before the browser has done anything wrong
+  const userDir = path.join(os.tmpdir(),
+    `wasm-cloth-cdp-${process.pid}-${Date.now().toString(36)}`).replace(/\\/g, "/");
+  const proc = spawn(bin, [
+    "--headless=new",
+    "--disable-gpu",
+    "--enable-unsafe-swiftshader",
+    "--hide-scrollbars",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--disable-background-timer-throttling",
+    "--remote-debugging-port=0",
+    `--user-data-dir=${userDir}`,
+    "--window-size=1440,900",
+    "about:blank",
+  ], { stdio: "ignore" });
+
+  const portFile = path.join(userDir, "DevToolsActivePort");
+  for (let i = 0; i < 120; i++) {
+    if (fs.existsSync(portFile)) {
+      const txt = fs.readFileSync(portFile, "utf8").split("\n");
+      const port = parseInt(txt[0], 10);
+      if (port > 0) return { proc, port, userDir, bin };
+    }
+    await sleep(100);
+  }
+  proc.kill();
+  throw new Error("Chrome never wrote DevToolsActivePort (launch flake)");
+}
+
+async function connect(port) {
+  // the about:blank page target
+  let list = [];
+  for (let i = 0; i < 60; i++) {
+    try {
+      list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+      const page = list.find((t) => t.type === "page");
+      if (page && page.webSocketDebuggerUrl) {
+        const ws = new WebSocket(page.webSocketDebuggerUrl);
+        await new Promise((res, rej) => {
+          ws.addEventListener("open", res, { once: true });
+          ws.addEventListener("error", () => rej(new Error("ws error")), { once: true });
+          setTimeout(() => rej(new Error("ws open timeout")), 5000);
+        });
+        return new CDP(ws);
+      }
+    } catch { /* not up yet */ }
+    await sleep(100);
+  }
+  throw new Error("could not attach to a page target");
+}
+
+const num = (n, d = 0) => Number(n).toFixed(d);
+
+/* ═════════════════════════════════════════════════════════════════════════ */
+(async () => {
+  fs.mkdirSync(OUT, { recursive: true });
+  let chrome;
+  for (let attempt = 1; ; attempt++) {
+    try { chrome = await launch(); break; } catch (e) {
+      if (attempt >= 3) throw e;
+      console.log(`  \x1b[2mlaunch attempt ${attempt} failed (${e.message}), retrying…\x1b[0m`);
+      await sleep(700);
+    }
+  }
+  const cdp = await connect(chrome.port);
+
+  const cleanup = () => {
+    killTree(chrome.proc);
+    // the profile dir may stay locked briefly; leave it to the cache's pruning
+    setTimeout(() => { try { fs.rmSync(chrome.userDir, { recursive: true, force: true }); } catch { /* locked */ } }, 800);
+  };
+  process.on("exit", cleanup);
+
+  // subscribe BEFORE navigating, or the error you need is the one you never see
+  await cdp.send("Page.enable");
+  await cdp.send("Runtime.enable");
+  await cdp.send("Log.enable");
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
+  });
+  await cdp.send("Page.navigate", { url: URL });
+  await cdp.waitFor("window.ClothApp && window.ClothApp.ready", 30000, "ClothApp.ready");
+
+  section("boot");
+  const info = await cdp.eval("return window.ClothApp.info()");
+  check("page title names the project", (await cdp.eval("return document.title")).includes("wasm-cloth"));
+  check("WebGL2 context is live", /WebGL 2/.test(info.glVersion || ""), info.glVersion);
+  check("wasm module booted from the embedded bytes", info.wasmBytes > 2000, `${info.wasmBytes} bytes`);
+  check("climbs to a 72x72 grid by default", info.cols === 72 && info.verts === 5184,
+    `${info.cols}² = ${info.verts} verts`);
+  check("three constraint families are live in the browser",
+    info.struct > 0 && info.shear > 0 && info.bend > 0,
+    `structural ${info.struct} · shear ${info.shear} · bend ${info.bend} = ${info.constraints}`);
+  check("no renderer banner is showing", await cdp.eval("return document.getElementById('banner').hidden"));
+
+  const f0 = await cdp.eval("return window.ClothApp.frameCount()");
+  await sleep(600);
+  const f1 = await cdp.eval("return window.ClothApp.frameCount()");
+  check("the requestAnimationFrame loop is actually running", f1 > f0, `${f0} → ${f1} frames in 600 ms`);
+
+  /* ── the simulation, through the page's own hook ───────────────────────── */
+  section("simulation in the browser");
+  const sim1 = await cdp.eval("return window.ClothApp.advance(180)");
+  check("3000 ms of simulation ran without blowing up",
+    Number.isFinite(sim1.err) && sim1.err < 0.12, `constraint error ${Number(sim1.err).toExponential(2)}`);
+  const contact = await cdp.eval(`
+    let frames = 0, maxHits = 0;
+    for (let k = 0; k < 12; k++) { const r = window.ClothApp.advance(5); if (r.hits > 0) frames++; maxHits = Math.max(maxHits, r.hits); }
+    return { frames, of: 12, maxHits };
+  `);
+  check("cloth is in contact with the sphere", contact.frames >= 10 && contact.maxHits > 50,
+    `${contact.frames}/${contact.of} sampled windows touching, up to ${contact.maxHits} vertices`);
+  const radius = await cdp.eval("return window.ClothApp.state.sphereR");
+  const gap = await cdp.eval("return window.ClothApp.sphereGap()");
+  check("no vertex is inside the sphere", gap >= radius - 2e-3,
+    `nearest vertex ${num(gap, 4)} from centre (r=${radius})`);
+  const ext = await cdp.eval("return window.ClothApp.extentY()");
+  check("fabric has draped into a 3D fold", ext > 0.3, `vertical extent ${num(ext, 3)} world units`);
+
+  const nstats = await cdp.eval("return window.ClothApp.normalStats()");
+  check("all normals are unit length in GPU-bound buffers", nstats.unit === nstats.n,
+    `${nstats.unit}/${nstats.n}`);
+  const h0 = await cdp.eval("return window.ClothApp.normalHash()");
+  await cdp.eval("window.ClothApp.advance(8)");
+  const h1 = await cdp.eval("return window.ClothApp.normalHash()");
+  check("normal field changes when the cloth moves (lighting stays correct)", h0 !== h1,
+    `${h0} → ${h1}`);
+
+  /* ── pixels, not state ─────────────────────────────────────────────────── */
+  section("what was rendered");
+  await cdp.eval("window.ClothApp.setCamera({yaw:0.62,pitch:0.42,dist:5.15}); window.ClothApp.render()");
+  const inkOf = () => cdp.eval(`
+    const src = document.getElementById('gl');
+    const c = document.createElement('canvas');
+    c.width = 320; c.height = 200;
+    const g = c.getContext('2d');
+    g.drawImage(src, 0, 0, c.width, c.height);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+    let lit = 0, bright = 0, sum = 0;
+    const total = c.width * c.height;
+    const px = new Float32Array(total);
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+      const l = 0.2126*d[i] + 0.7152*d[i+1] + 0.0722*d[i+2];
+      px[p] = l; sum += l;
+      if (l > 24) lit++;
+      if (l > 110) bright++;
+    }
+    return { lit: lit/total, bright: bright/total, mean: sum/total, px: Array.from(px) };
+  `);
+  const ink = await inkOf();
+  check("canvas contains a lit 3D scene", ink.lit > 0.12, `${(ink.lit * 100).toFixed(1)}% of pixels above background`);
+  check("lighting is not flat (shading gradient across the fabric)", ink.mean > 6 && ink.bright > 0.002,
+    `mean luminance ${num(ink.mean, 1)}, ${(ink.bright * 100).toFixed(2)}% bright`);
+  check("the sphere carries a specular highlight", ink.bright > 0.002, `${(ink.bright * 100).toFixed(2)}% bright pixels`);
+
+  /* sphere on/off must change the picture: proves the obstacle is drawn */
+  const withSphere = ink.lit;
+  await cdp.eval("window.ClothApp.setState({sphereOn:false}); window.ClothApp.render()");
+  const ink2 = (await inkOf()).lit;
+  check("hiding the obstacle changes the render", Math.abs(withSphere - ink2) > 0.004,
+    `${(withSphere * 100).toFixed(1)}% → ${(ink2 * 100).toFixed(1)}% lit pixels`);
+  await cdp.eval("window.ClothApp.setState({sphereOn:true})");
+
+  /* ── UI wiring: paired views of one state must never disagree ──────────── */
+  section("controls");
+  await cdp.eval(`
+    const el = document.getElementById('c-wind');
+    el.value = '1.40';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  const windState = await cdp.eval("return window.ClothApp.state.wind");
+  const windOut = await cdp.eval("return document.getElementById('o-wind').textContent");
+  check("wind slider moves state and its own readout together",
+    Math.abs(windState - 1.4) < 1e-6 && windOut === "1.40", `state ${windState} · readout ${windOut}`);
+
+  await cdp.eval("window.ClothApp.setState({wind:0.55})");
+  const beforeRes = await cdp.eval("return window.ClothApp.info()");
+  await cdp.eval("document.querySelector('#res button[data-res=\"88\"]').click()");
+  await sleep(150);
+  const afterRes = await cdp.eval("return window.ClothApp.info()");
+  const dom = await cdp.eval("return window.ClothApp.dom()");
+  check("mesh rebuild switches to 88x88", afterRes.cols === 88 && afterRes.verts === 7744,
+    `${beforeRes.cols}² → ${afterRes.cols}²`);
+  check("badges, stats and the hook agree after the rebuild",
+    dom.grid === "88×88" && dom.verts === "7,744" && dom.cons === afterRes.constraints.toLocaleString("en-US"),
+    `${dom.grid} · ${dom.verts} verts · ${dom.cons} constraints`);
+
+  await cdp.eval("document.querySelector('#res button[data-res=\"72\"]').click()");
+  await sleep(150);
+  check("mesh returns to 72x72", (await cdp.eval("return window.ClothApp.info().verts")) === 5184);
+
+  const pin0 = await cdp.eval("return window.ClothApp.dom().pin");
+  await cdp.eval("document.getElementById('b-pin').click()");
+  const pinnedFrame = await cdp.eval("return window.ClothApp.pinned()");
+  const pin1 = await cdp.eval("return window.ClothApp.dom().pin");
+  check("pin mode toggles to a border frame", pinnedFrame === 284 && pin0 !== pin1, `${pin0} → ${pin1}`);
+  await cdp.eval("document.getElementById('b-pin').click()");
+  check("pin mode returns to four corners", (await cdp.eval("return window.ClothApp.pinned()")) === 16);
+
+  await cdp.eval("window.ClothApp.setState({wire:false}); window.ClothApp.advance(240); window.ClothApp.render()");
+  const solidInk = await inkOf();
+  await cdp.eval("document.getElementById('b-wire').click(); window.ClothApp.render()");
+  const wireInk = await inkOf();
+  let changedPx = 0;
+  for (let i = 0; i < solidInk.px.length; i++) if (Math.abs(wireInk.px[i] - solidInk.px[i]) > 8) changedPx++;
+  check("mesh overlay actually draws lines on screen",
+    (await cdp.eval("return document.getElementById('b-wire').getAttribute('aria-pressed')")) === "true" &&
+    changedPx / solidInk.px.length > 0.02,
+    `${(100 * changedPx / solidInk.px.length).toFixed(1)}% of pixels changed`);
+  const wireShot = path.join(OUT, "mesh-wireframe.png");
+  await cdp.shot(wireShot);
+  await cdp.eval("document.getElementById('b-wire').click(); window.ClothApp.render()");
+
+  await cdp.eval("document.getElementById('b-pause').click()");
+  const pausedView = await cdp.eval(`
+    return {
+      paused: window.ClothApp.state.paused,
+      text: document.getElementById('b-pause').textContent,
+      aria: document.getElementById('b-pause').getAttribute('aria-pressed'),
+      clock: window.ClothApp.clock(),
+    };
+  `);
+  await sleep(500);
+  const stillFrozen = await cdp.eval("return window.ClothApp.clock()");
+  await cdp.eval("document.getElementById('b-pause').click()");
+  const resumed = await cdp.eval(`return { paused: window.ClothApp.state.paused,
+    text: document.getElementById('b-pause').textContent };`);
+  check("pause button reflects its state", pausedView.paused === true && /play/i.test(pausedView.text) &&
+    pausedView.aria === "true", `label "${pausedView.text}" · aria-pressed ${pausedView.aria}`);
+  check("pause actually freezes the clock", stillFrozen.simTime === pausedView.clock.simTime,
+    `simTime ${pausedView.clock.simTime}s → ${stillFrozen.simTime}s over 500 ms`);
+  check("resume restores playback", resumed.paused === false && /pause/i.test(resumed.text),
+    `label "${resumed.text}"`);
+
+  /* ── pointer interaction ───────────────────────────────────────────────── */
+  section("interaction");
+  const camA = await cdp.eval("return window.ClothApp.camera()");
+  await cdp.eval(`
+    const cv = document.getElementById('gl');
+    const r = cv.getBoundingClientRect();
+    const opts = (x, y) => ({ clientX: r.left + x, clientY: r.top + y, bubbles: true,
+      pointerId: 1, pointerType: 'mouse', isPrimary: true });
+    cv.dispatchEvent(new PointerEvent('pointerdown', opts(r.width * 0.4, r.height * 0.5)));
+    cv.dispatchEvent(new PointerEvent('pointermove', opts(r.width * 0.62, r.height * 0.42)));
+    cv.dispatchEvent(new PointerEvent('pointerup', opts(r.width * 0.62, r.height * 0.42)));
+    cv.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+    return true;
+  `);
+  const camB = await cdp.eval("return window.ClothApp.camera()");
+  check("drag orbits the camera", Math.abs(camB.yaw - camA.yaw) > 0.05,
+    `yaw ${num(camA.yaw, 3)} → ${num(camB.yaw, 3)}`);
+  check("wheel zooms", Math.abs(camB.dist - camA.dist) > 0.01, `dist ${num(camA.dist, 2)} → ${num(camB.dist, 2)}`);
+
+  /* ── responsive layout ─────────────────────────────────────────────────── */
+  section("responsive");
+  for (const [w, h, label] of [[390, 844, "phone"], [320, 568, "small phone"], [1024, 768, "tablet"]]) {
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+    await cdp.eval("window.dispatchEvent(new Event('resize'))");
+    await sleep(220);
+    const m = await cdp.eval(`
+      const cv = document.getElementById('gl');
+      const r = cv.getBoundingClientRect();
+      const panel = document.getElementById('panel').getBoundingClientRect();
+      const stats = document.getElementById('stats').getBoundingClientRect();
+      const hudR = document.getElementById('hud').getBoundingClientRect().right;
+      const cells = Array.from(document.querySelectorAll('#stats .cell'))
+        .map(el => Math.round(el.getBoundingClientRect().bottom));
+      return {
+        iw: window.innerWidth, ih: window.innerHeight,
+        canvasW: Math.round(r.width), canvasH: Math.round(r.height),
+        overflow: document.documentElement.scrollWidth - window.innerWidth,
+        panelH: Math.round(panel.height), panelBottom: Math.round(panel.bottom),
+        statsRight: Math.round(stats.right), statsBottom: Math.round(stats.bottom),
+        cellBottoms: cells, hud: hudR,
+      };
+    `);
+    const ok = m.iw === w && m.overflow <= 0 && m.canvasW === w && m.panelH > 40 &&
+      m.statsRight <= w + 1 && m.hud <= w + 1;
+    check(`${label} ${w}×${h} fits without overflow`, ok,
+      `innerWidth ${m.iw} · canvas ${m.canvasW}×${m.canvasH} · overflow ${m.overflow}px · panel ${m.panelH}px`);
+    const clipped = m.cellBottoms.filter((b) => b > m.ih + 0.5);
+    check(`${label} stat strip is fully inside the viewport`, clipped.length === 0,
+      clipped.length ? `cells end at ${clipped.join(",")} vs ${m.ih}px` : `lowest cell bottom ${Math.max(...m.cellBottoms)} of ${m.ih}px`);
+    // screenshot at the width it claims to be: capture inside the emulation
+    if (w === 390) {
+      await cdp.eval("window.ClothApp.advance(120); window.ClothApp.render()");
+      const freeInk = await cdp.eval(`
+        const src = document.getElementById('gl');
+        const panel = document.getElementById('panel').getBoundingClientRect();
+        const freeH = Math.max(40, Math.round(panel.top));
+        const c = document.createElement('canvas'); c.width = 200; c.height = 120;
+        const g = c.getContext('2d');
+        g.drawImage(src, 0, 0, src.width, freeH * (src.height / src.clientHeight), 0, 0, c.width, c.height);
+        const d = g.getImageData(0, 0, c.width, c.height).data;
+        let lit = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const l = 0.2126*d[i] + 0.7152*d[i+1] + 0.0722*d[i+2];
+          if (l > 24) lit++;
+        }
+        return { lit: lit / (c.width * c.height), freeH };
+      `);
+      check("subject is framed in the uncovered area above the sheet",
+        freeInk.lit > 0.05, `${(freeInk.lit * 100).toFixed(1)}% of the free ${freeInk.freeH}px strip is lit`);
+      const phoneCam = await cdp.eval("return window.ClothApp.camera()");
+      check("portrait framing offsets the aim point below the subject",
+        phoneCam.covered > 0.2, `${(phoneCam.covered * 100).toFixed(0)}% of the viewport is covered by controls`);
+      check("portrait view backs the camera off to fit the sheet",
+        phoneCam.effDist > 6.5 && phoneCam.effDist > phoneCam.dist,
+        `effective distance ${num(phoneCam.effDist, 2)} vs ${phoneCam.dist}`);
+      await cdp.shot(path.join(OUT, "phone.png"));
+    }
+  }
+  const phoneShot = path.join(OUT, "phone.png");
+  const phoneSize = (() => {
+    const b = fs.readFileSync(phoneShot);
+    return `${Math.round(b.readUInt32BE(16))}×${Math.round(b.readUInt32BE(20))}`;
+  })();
+  check("phone screenshot is a phone-sized capture", phoneSize === "390×844", phoneSize);
+
+  await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await cdp.eval("window.dispatchEvent(new Event('resize')); window.ClothApp.setCamera({yaw:0.62,pitch:0.42,dist:5.15}); window.ClothApp.advance(240); window.ClothApp.render()");
+  await sleep(200);
+  const heroShot = path.join(OUT, "hero.png");
+  await cdp.shot(heroShot);
+
+  /* ── console hygiene ───────────────────────────────────────────────────── */
+  section("console");
+  const exceptions = cdp.exceptions.filter((e) => !/favicon/i.test(e));
+  check("no uncaught exceptions for the whole session", exceptions.length === 0,
+    exceptions.slice(0, 2).join(" | ") || "clean");
+  const consoleErr = cdp.consoleErrors.filter((e) => !/favicon/i.test(e));
+  check("no console errors", consoleErr.length === 0, consoleErr.slice(0, 2).join(" | ") || "clean");
+  const logErr = cdp.logErrors.filter((e) => !/favicon/i.test(e));
+  check("no network/log errors", logErr.length === 0, logErr.slice(0, 2).join(" | ") || "clean");
+
+  section("screenshots");
+  for (const f of [heroShot, wireShot, phoneShot]) {
+    console.log(`  ${path.relative(ROOT, f)}  \x1b[2m${(fs.statSync(f).size / 1024).toFixed(0)} KB\x1b[0m`);
+  }
+
+  console.log(`\n${fail === 0 ? "\x1b[32m" : "\x1b[31m"}${pass}/${pass + fail} assertions passed\x1b[0m`);
+  if (fail) {
+    console.log("failed:\n  - " + fails.join("\n  - "));
+    cleanup();
+    process.exit(1);
+  }
+  cleanup();
+})().catch((err) => {
+  console.error("\nharness error:", err && err.message ? err.message : err);
+  process.exit(1);
+});

@@ -1,0 +1,16 @@
+{
+  "name": "wasm-cloth",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Verlet cloth simulation \u2014 72x72 mesh draping over a rotating sphere, solver and normal recalculation in WebAssembly",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "verify": "node scripts/verify_wasm.js",
+    "verify:browser": "node scripts/browser_check.js",
+    "verify:all": "node scripts/build.js && node scripts/verify_wasm.js && node scripts/browser_check.js"
+  },
+  "devDependencies": {
+    "assemblyscript": "0.28.20"
+  },
+  "license": "MIT"
+}
