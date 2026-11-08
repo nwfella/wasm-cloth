@@ -255,8 +255,11 @@ const num = (n, d = 0) => Number(n).toFixed(d);
     `${contact.frames}/${contact.of} sampled windows touching, up to ${contact.maxHits} vertices`);
   const radius = await cdp.eval("return window.ClothApp.state.sphereR");
   const gap = await cdp.eval("return window.ClothApp.sphereGap()");
-  check("no vertex is inside the sphere", gap >= radius - 2e-3,
-    `nearest vertex ${num(gap, 4)} from centre (r=${radius})`);
+  // the collider carries a ~12 mm skin so whole TRIANGLES stay outside the drawn
+  // sphere, not just vertices: the gap must therefore be strictly greater than
+  // the rendered radius, or the fabric speckles through the surface
+  check("no vertex is inside the sphere", gap >= radius,
+    `nearest vertex ${num(gap, 4)} from centre (r=${radius}, skin pushes it clear)`);
   const ext = await cdp.eval("return window.ClothApp.extentY()");
   check("fabric has draped into a 3D fold", ext > 0.3, `vertical extent ${num(ext, 3)} world units`);
 

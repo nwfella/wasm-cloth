@@ -2952,6 +2952,8 @@
   f32.const 0.019999999552965164
   f32.lt
   select
+  f32.const 0.012000000104308128
+  f32.add
   global.set $src/cloth/sphR
   local.get $4
   global.set $src/cloth/sphOn

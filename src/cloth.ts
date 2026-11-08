@@ -95,6 +95,11 @@ let floorY: f32 = -2.4;
 // that feedback loop without touching normal motion — real folds move orders of
 // magnitude slower than this.
 const MAX_STEP: f32 = 0.12;      // world units per step
+// Collision resolves VERTICES; a triangle between two resolved vertices still
+// sags inside the sphere between them, which shows up as speckled interpenetration
+// where the fabric wraps a curved surface. Pushing vertices out by a thin skin
+// keeps whole triangles outside the sphere that is actually drawn.
+const COLLIDE_SKIN: f32 = 0.012;
 
 // sphere collider
 let sphX: f32 = 0.0;
@@ -248,7 +253,7 @@ export function setPhysics(g: f32, drag: f32, wind: f32, freq: f32, iters: i32,
 
 export function setSphere(cx: f32, cy: f32, cz: f32, r: f32, enabled: i32): void {
   sphX = cx; sphY = cy; sphZ = cz;
-  sphR = r < 0.02 ? 0.02 : r;
+  sphR = (r < 0.02 ? 0.02 : r) + COLLIDE_SKIN;
   sphOn = enabled;
 }
 
