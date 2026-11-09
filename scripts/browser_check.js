@@ -300,12 +300,25 @@ const num = (n, d = 0) => Number(n).toFixed(d);
   check("the sphere carries a specular highlight", ink.bright > 0.002, `${(ink.bright * 100).toFixed(2)}% bright pixels`);
 
   /* sphere on/off must change the picture: proves the obstacle is drawn */
-  const withSphere = ink.lit;
+  // Change ONLY the sphere: the auto-orbit was moving the camera between the two
+  // captures, so the delta it measured was partly camera motion (measured flake:
+  // 0.6 % on one run, under the threshold on another).
+  await cdp.eval("window.ClothApp.setState({autoOrbit:false, paused:true}); window.ClothApp.render()");
+  const withSphere = await inkOf();
   await cdp.eval("window.ClothApp.setState({sphereOn:false}); window.ClothApp.render()");
-  const ink2 = (await inkOf()).lit;
-  check("hiding the obstacle changes the render", Math.abs(withSphere - ink2) > 0.004,
-    `${(withSphere * 100).toFixed(1)}% → ${(ink2 * 100).toFixed(1)}% lit pixels`);
-  await cdp.eval("window.ClothApp.setState({sphereOn:true})");
+  const noSphere = await inkOf();
+  // Count PIXELS THAT CHANGED, not the change in "lit" fraction. The obstacle is a
+  // dark ceramic sphere: it is unmistakably on screen, but most of its pixels sit
+  // below the lit threshold, so the lit-fraction delta measured 0.3-0.6 % against a
+  // 0.4 % bound and flipped between runs on a correct render.
+  let spherePx = 0;
+  for (let i = 0; i < withSphere.px.length; i++) {
+    if (Math.abs(noSphere.px[i] - withSphere.px[i]) > 8) spherePx++;
+  }
+  const sphereFrac = spherePx / withSphere.px.length;
+  check("hiding the obstacle changes the render", sphereFrac > 0.02,
+    `${(sphereFrac * 100).toFixed(1)}% of pixels changed (${(withSphere.lit * 100).toFixed(1)}% → ${(noSphere.lit * 100).toFixed(1)}% lit)`);
+  await cdp.eval("window.ClothApp.setState({sphereOn:true, autoOrbit:true, paused:false})");
 
   /* ── UI wiring: paired views of one state must never disagree ──────────── */
   section("controls");
@@ -470,6 +483,129 @@ const num = (n, d = 0) => Number(n).toFixed(d);
   const heroShot = path.join(OUT, "hero.png");
   await cdp.shot(heroShot);
 
+  /* ── the sport: a second mode on the same wasm module ──────────────────── */
+  section("sling mode");
+  const freePanel = await cdp.eval("return !document.getElementById('pane-free').hidden");
+  const modeOk = await cdp.eval("return window.ClothApp.mode('sling')");
+  const switched = await cdp.eval(`return {
+    mode: window.ClothApp.sling().mode,
+    freeHidden: document.getElementById('pane-free').hidden,
+    slingShown: !document.getElementById('pane-sling').hidden,
+    hud: !document.getElementById('slinghud').hidden,
+    hudH: document.getElementById('slinghud').getBoundingClientRect().height,
+    sphereOn: window.ClothApp.state.sphereOn,
+    ballOn: window.ClothApp.ball().on,
+  }`);
+  check("the sport is a second mode, not a replacement", freePanel && modeOk === "sling" &&
+    switched.freeHidden && switched.slingShown && switched.hud && switched.hudH > 20,
+    `free pane before ${freePanel ? "shown" : "hidden"} → sling pane shown, HUD ${num(switched.hudH)}px tall`);
+  check("switching modes swaps the collider for the dynamic ball",
+    switched.sphereOn === false && switched.ballOn === 1,
+    `kinematic sphere ${switched.sphereOn ? "on" : "off"}, dynamic ball ${switched.ballOn ? "on" : "off"}`);
+
+  await cdp.waitFor("window.ClothApp.sling().phase === 'ready'", 30000, "ball settled in the pocket");
+  // Freeze before sampling: the RAF loop keeps stepping, so a sample taken a few
+  // hundred ms after `ready` can catch the ball bobbing on the wind-driven sheet
+  // and report motion that has nothing to do with the landing.
+  await cdp.eval("window.ClothApp.setState({paused:true})");
+  const settled = await cdp.eval("return { s: window.ClothApp.sling(), b: window.ClothApp.ball() }");
+  await cdp.eval("window.ClothApp.setState({paused:false})");
+  check("the ball drops, lands in the pocket and comes to rest there",
+    settled.s.phase === "ready" && settled.b.contacts > 0 && settled.b.speed < 0.4,
+    `y ${num(settled.b.y, 3)}, ${settled.b.contacts} vertices in contact, speed ${num(settled.b.speed, 3)} u/s`);
+
+  /* a real pointer drag on an anchor handle must move the module's pin */
+  const drag = await cdp.eval(`
+    const a = window.ClothApp.anchorScreen(0);
+    const cv = document.getElementById('gl');
+    const opts = (x, y) => ({ clientX: x, clientY: y, bubbles: true, pointerId: 7, pointerType: 'mouse', isPrimary: true });
+    window.__pre = { anchor: window.ClothApp.anchors()[0], pos: window.ClothApp.positions() };
+    if (!a) return { err: 'no projection' };
+    cv.dispatchEvent(new PointerEvent('pointerdown', opts(a.x, a.y)));
+    cv.dispatchEvent(new PointerEvent('pointermove', opts(a.x + 150, a.y + 86)));
+    return { press: { x: Math.round(a.x), y: Math.round(a.y) }, phase: window.ClothApp.sling().phase };
+  `);
+  await cdp.eval("window.ClothApp.advance(70)");
+  const dragState = await cdp.eval(`
+    const post = window.ClothApp.anchors()[0];
+    const pos = window.ClothApp.positions();
+    let moved = 0;
+    for (let i = 0; i < pos.length; i++) if (Math.abs(pos[i] - window.__pre.pos[i]) > 1e-4) moved++;
+    return {
+      before: window.__pre.anchor, after: post, moved, of: pos.length,
+      gain: window.ClothApp.sling().gain,
+      power: getComputedStyle(document.getElementById('powerwrap')).opacity,
+      barW: document.getElementById('powerfill').style.width,
+    };
+  `);
+  const anchorDelta = Math.hypot(dragState.after[0] - dragState.before[0],
+    dragState.after[1] - dragState.before[1], dragState.after[2] - dragState.before[2]);
+  check("dragging an anchor moves that anchor inside the module", anchorDelta > 0.05,
+    `anchor 0 moved ${num(anchorDelta, 3)} world units from (${dragState.before.map((v) => num(v, 2)).join(",")})`);
+  check("the drag deforms the fabric that is uploaded to the GPU", dragState.moved > 0,
+    `${dragState.moved}/${dragState.of} sampled vertex components changed`);
+  check("the charge meter reports the draw", dragState.gain > 0.2 && dragState.barW !== "0%",
+    `gain ${num(dragState.gain, 2)} → meter ${dragState.barW}`);
+
+  /* release and catch the ball in the air */
+  await cdp.eval("document.getElementById('gl').dispatchEvent(new PointerEvent('pointerup',{clientX:200,clientY:200,bubbles:true,pointerId:7,pointerType:'mouse',isPrimary:true})); return 1;");
+  let airborne = null;
+  for (let i = 0; i < 40; i++) {
+    await cdp.eval("window.ClothApp.advance(4)");
+    const b = await cdp.eval("return { b: window.ClothApp.ball(), phase: window.ClothApp.sling().phase }");
+    if (b.phase === "flight" && b.b.contacts === 0 && b.b.speed > 0.6) { airborne = b; break; }
+  }
+  check("releasing the draw throws the ball out of the sheet", !!airborne,
+    airborne ? `ball at (${num(airborne.b.x, 2)}, ${num(airborne.b.y, 2)}, ${num(airborne.b.z, 2)}) moving ${num(airborne.b.speed, 2)} u/s, no contact` : "ball never left the fabric");
+  await cdp.eval("window.ClothApp.render()");
+  const flightShot = path.join(OUT, "sling-flight.png");
+  await cdp.shot(flightShot);
+
+  /* a deterministic full-power shot must score, and the HUD must agree */
+  const shot1 = await cdp.eval("return window.ClothApp.slingShoot(0.6, 0)");
+  const after1 = await cdp.eval("return { s: window.ClothApp.sling(), dom: window.ClothApp.slingScores() }");
+  check("a full-power draw lands the ball in the target", shot1.hit === true,
+    `target distance ${num(shot1.err, 3)} vs radius ${num(after1.s.target.r, 2)}`);
+  check("the score readout and the hook agree after a hit",
+    after1.dom.score === String(after1.s.score) && after1.dom.panelScore === String(after1.s.score) &&
+    after1.dom.balls === String(after1.s.balls),
+    `hook score ${after1.s.score} · HUD "${after1.dom.score}" · panel "${after1.dom.panelScore}" · balls "${after1.dom.balls}"`);
+  await cdp.eval("window.ClothApp.render()");
+  const hitShot = path.join(OUT, "sling-hit.png");
+  await cdp.shot(hitShot);
+
+  /* three balls, then the run ends with a rendered score */
+  await cdp.eval("window.ClothApp.slingReset()");
+  const run = [];
+  for (let i = 0; i < 3; i++) run.push(await cdp.eval("return window.ClothApp.slingShoot(0.6, 0)"));
+  const endState = await cdp.eval("return { s: window.ClothApp.sling(), dom: window.ClothApp.slingScores() }");
+  check("a full run consumes exactly three balls and ends",
+    run.map((r) => r.balls).join(",") === "2,1,0" && endState.s.phase === "over" && endState.s.balls === 0,
+    `balls after each shot ${run.map((r) => r.balls).join(" → ")}, phase "${endState.s.phase}"`);
+  const acc = endState.s.shots ? endState.s.hits / endState.s.shots : 0;
+  check("the score is hits + accuracy, and it is rendered in the DOM",
+    Number(endState.dom.score) === endState.s.score &&
+    endState.s.score === endState.s.hitPts + Math.round(acc * 100) && Number(endState.dom.score) > 0,
+    `${endState.s.hits}/${endState.s.shots} hits · combo points ${endState.s.hitPts} + accuracy ${Math.round(acc * 100)} = ${endState.s.score} (HUD "${endState.dom.score}")`);
+
+  /* back to free play: the demo must be exactly what it was */
+  await cdp.eval("window.ClothApp.mode('free')");
+  await cdp.eval("window.ClothApp.advance(120); window.ClothApp.render()");
+  const backState = await cdp.eval(`return {
+    mode: window.ClothApp.sling().mode,
+    freeShown: !document.getElementById('pane-free').hidden,
+    slingHidden: document.getElementById('pane-sling').hidden,
+    hudHidden: document.getElementById('slinghud').hidden,
+    ballOn: window.ClothApp.ball().on,
+    sphereOn: window.ClothApp.state.sphereOn,
+    verts: window.ClothApp.info().verts,
+    hits: window.ClothApp.hitCount(),
+  }`);
+  check("free play is reachable again and unchanged", backState.mode === "free" && backState.freeShown &&
+    backState.slingHidden && backState.hudHidden && backState.ballOn === 0 && backState.sphereOn === true &&
+    backState.verts === 5184 && backState.hits > 0,
+    `ball off, sphere on, ${backState.verts} verts, ${backState.hits} contacts — the shipped demo still runs`);
+
   /* ── console hygiene ───────────────────────────────────────────────────── */
   section("console");
   const exceptions = cdp.exceptions.filter((e) => !/favicon/i.test(e));
@@ -481,7 +617,7 @@ const num = (n, d = 0) => Number(n).toFixed(d);
   check("no network/log errors", logErr.length === 0, logErr.slice(0, 2).join(" | ") || "clean");
 
   section("screenshots");
-  for (const f of [heroShot, wireShot, phoneShot]) {
+  for (const f of [heroShot, wireShot, phoneShot, flightShot, hitShot]) {
     console.log(`  ${path.relative(ROOT, f)}  \x1b[2m${(fs.statSync(f).size / 1024).toFixed(0)} KB\x1b[0m`);
   }
 

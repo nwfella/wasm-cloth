@@ -1,19 +1,22 @@
 (module
  (type $0 (func (result i32)))
- (type $1 (func))
+ (type $1 (func (result f32)))
  (type $2 (func (param i32) (result f32)))
- (type $3 (func (result f32)))
+ (type $3 (func))
  (type $4 (func (param f64) (result f64)))
- (type $5 (func (param i32 i32) (result i32)))
- (type $6 (func (param i32 i32 i32) (result i32)))
- (type $7 (func (param i32 i32 i32 i32)))
- (type $8 (func (param i64) (result i32)))
- (type $9 (func (param i32)))
- (type $10 (func (param f32 f32)))
- (type $11 (func (param f32 f32 f32 f32 i32)))
- (type $12 (func (param f32 f32 f32 f32 i32 f32 f32 f32 f32)))
- (type $13 (func (param i32 f32 f32 f32)))
- (type $14 (func (param i32 i32 f32 f32)))
+ (type $5 (func (param i32 f32 f32 f32)))
+ (type $6 (func (param f32 f32 f32 f32)))
+ (type $7 (func (param i32 i32) (result i32)))
+ (type $8 (func (param i32 i32 i32) (result i32)))
+ (type $9 (func (param i32 i32 i32 i32)))
+ (type $10 (func (param i64) (result i32)))
+ (type $11 (func (param i32)))
+ (type $12 (func (param f32 f32)))
+ (type $13 (func (param f32 f32 f32 f32 i32)))
+ (type $14 (func (param f32 f32 f32 f32 i32 f32 f32 f32 f32)))
+ (type $15 (func (param f32 f32 f32 f32 f32 f32 f32 f32 i32)))
+ (type $16 (func (param f32 f32 f32)))
+ (type $17 (func (param i32 i32 f32 f32)))
  (import "env" "abort" (func $~lib/builtins/abort (param i32 i32 i32 i32)))
  (global $~lib/rt/stub/offset (mut i32) (i32.const 0))
  (global $src/cloth/bufP (mut i32) (i32.const 0))
@@ -58,6 +61,30 @@
  (global $src/cloth/sphZ (mut f32) (f32.const 0))
  (global $src/cloth/sphR (mut f32) (f32.const 0.6000000238418579))
  (global $src/cloth/sphOn (mut i32) (i32.const 1))
+ (global $src/cloth/ballPX (mut f32) (f32.const 0))
+ (global $src/cloth/ballPY (mut f32) (f32.const 1.600000023841858))
+ (global $src/cloth/ballPZ (mut f32) (f32.const 0))
+ (global $src/cloth/ballVX (mut f32) (f32.const 0))
+ (global $src/cloth/ballVY (mut f32) (f32.const 0))
+ (global $src/cloth/ballVZ (mut f32) (f32.const 0))
+ (global $src/cloth/ballRad (mut f32) (f32.const 0.1599999964237213))
+ (global $src/cloth/ballMass (mut f32) (f32.const 8))
+ (global $src/cloth/ballInvM (mut f32) (f32.const 0.125))
+ (global $src/cloth/ballActive (mut i32) (i32.const 0))
+ (global $src/cloth/ballGrav (mut f32) (f32.const 9.199999809265137))
+ (global $src/cloth/ballDrag (mut f32) (f32.const 0.9984999895095825))
+ (global $src/cloth/ballRest (mut f32) (f32.const 0.10000000149011612))
+ (global $src/cloth/ballMaxV (mut f32) (f32.const 9))
+ (global $src/cloth/ballContacts (mut i32) (i32.const 0))
+ (global $src/cloth/curDt (mut f32) (f32.const 0))
+ (global $src/cloth/bufAid (mut i32) (i32.const 0))
+ (global $src/cloth/bufAFirst (mut i32) (i32.const 0))
+ (global $src/cloth/AID (mut i32) (i32.const 0))
+ (global $src/cloth/AFIRST (mut i32) (i32.const 0))
+ (global $src/cloth/tgtX (mut f32) (f32.const 0))
+ (global $src/cloth/tgtY (mut f32) (f32.const 0))
+ (global $src/cloth/tgtZ (mut f32) (f32.const 0))
+ (global $src/cloth/tgtR (mut f32) (f32.const 0.4000000059604645))
  (global $src/cloth/hitCount (mut i32) (i32.const 0))
  (global $src/cloth/floorHits (mut i32) (i32.const 0))
  (global $src/cloth/pinnedN (mut i32) (i32.const 0))
@@ -76,10 +103,37 @@
  (data $3.1 (i32.const 1224) "\02\00\00\00\1e\00\00\00~\00l\00i\00b\00/\00r\00t\00/\00s\00t\00u\00b\00.\00t\00s")
  (data $4 (i32.const 1280) "n\83\f9\a2\00\00\00\00\d1W\'\fc)\15DN\99\95b\db\c0\dd4\f5\abcQ\feA\90C<:n$\b7a\c5\bb\de\ea.I\06\e0\d2MB\1c\eb\1d\fe\1c\92\d1\t\f55\82\e8>\a7)\b1&p\9c\e9\84D\bb.9\d6\919A~_\b4\8b_\84\9c\f49S\83\ff\97\f8\1f;(\f9\bd\8b\11/\ef\0f\98\05\de\cf~6m\1fm\nZf?FO\b7\t\cb\'\c7\ba\'u-\ea_\9e\f79\07={\f1\e5\eb\b1_\fbk\ea\92R\8aF0\03V\08]\8d\1f \bc\cf\f0\abk{\fca\91\e3\a9\1d6\f4\9a_\85\99e\08\1b\e6^\80\d8\ff\8d@h\a0\14W\15\06\061\'sM")
  (export "init" (func $src/cloth/init))
+ (export "setAnchor" (func $src/cloth/setAnchor))
+ (export "resetAnchors" (func $src/cloth/resetAnchors))
+ (export "anchorX" (func $src/cloth/anchorX))
+ (export "anchorY" (func $src/cloth/anchorY))
+ (export "anchorZ" (func $src/cloth/anchorZ))
+ (export "anchorCount" (func $src/cloth/anchorCount))
  (export "setPinMode" (func $src/cloth/setPinMode))
  (export "reset" (func $src/cloth/reset))
  (export "setPhysics" (func $src/cloth/setPhysics))
  (export "setSphere" (func $src/cloth/setSphere))
+ (export "setBall" (func $src/cloth/setBall))
+ (export "setBallPhysics" (func $src/cloth/setBallPhysics))
+ (export "resetBall" (func $src/cloth/resetBall))
+ (export "ballX" (func $src/cloth/ballX))
+ (export "ballY" (func $src/cloth/ballY))
+ (export "ballZ" (func $src/cloth/ballZ))
+ (export "ballVelX" (func $src/cloth/ballVelX))
+ (export "ballVelY" (func $src/cloth/ballVelY))
+ (export "ballVelZ" (func $src/cloth/ballVelZ))
+ (export "ballRadius" (func $src/cloth/ballRadius))
+ (export "ballOn" (func $src/cloth/ballOn))
+ (export "ballContactCount" (func $src/cloth/ballContactCount))
+ (export "ballSpeed" (func $src/cloth/ballSpeed))
+ (export "ballKinetic" (func $src/cloth/ballKinetic))
+ (export "setTarget" (func $src/cloth/setTarget))
+ (export "scored" (func $src/cloth/scored))
+ (export "targetDist" (func $src/cloth/targetDist))
+ (export "targetX" (func $src/cloth/targetX))
+ (export "targetY" (func $src/cloth/targetY))
+ (export "targetZ" (func $src/cloth/targetZ))
+ (export "targetR" (func $src/cloth/targetR))
  (export "step" (func $src/cloth/step))
  (export "computeNormals" (func $src/cloth/computeNormals))
  (export "getVertexCount" (func $src/cloth/getVertexCount))
@@ -1343,6 +1397,112 @@
   end
   call $src/cloth/reset
  )
+ (func $src/cloth/setAnchor (param $0 i32) (param $1 f32) (param $2 f32) (param $3 f32)
+  (local $4 i32)
+  (local $5 i32)
+  (local $6 i32)
+  (local $7 i32)
+  local.get $0
+  i32.const 0
+  i32.lt_s
+  local.get $0
+  i32.const 4
+  i32.ge_s
+  i32.or
+  if
+   return
+  end
+  loop $for-loop|0
+   local.get $5
+   global.get $src/cloth/ROWS
+   i32.lt_s
+   if
+    i32.const 0
+    local.set $4
+    loop $for-loop|1
+     local.get $4
+     global.get $src/cloth/COLS
+     i32.lt_s
+     if
+      block $for-continue|1
+       local.get $0
+       local.get $5
+       global.get $src/cloth/COLS
+       i32.mul
+       local.get $4
+       i32.add
+       local.tee $6
+       i32.const 2
+       i32.shl
+       local.tee $7
+       global.get $src/cloth/AID
+       i32.add
+       i32.load
+       i32.ne
+       br_if $for-continue|1
+       global.get $src/cloth/IVM
+       local.get $7
+       i32.add
+       f32.load
+       f32.const 0
+       f32.ne
+       br_if $for-continue|1
+       global.get $src/cloth/P
+       local.get $6
+       i32.const 4
+       i32.shl
+       i32.add
+       local.tee $6
+       local.get $4
+       f32.convert_i32_s
+       global.get $src/cloth/COLS
+       i32.const 1
+       i32.sub
+       f32.convert_i32_s
+       f32.const 0.5
+       f32.mul
+       f32.sub
+       global.get $src/cloth/SPACING
+       f32.mul
+       local.get $1
+       f32.add
+       f32.store
+       local.get $6
+       global.get $src/cloth/PIN_Y
+       local.get $2
+       f32.add
+       f32.store offset=4
+       local.get $6
+       local.get $5
+       f32.convert_i32_s
+       global.get $src/cloth/ROWS
+       i32.const 1
+       i32.sub
+       f32.convert_i32_s
+       f32.const 0.5
+       f32.mul
+       f32.sub
+       global.get $src/cloth/SPACING
+       f32.mul
+       local.get $3
+       f32.add
+       f32.store offset=8
+      end
+      local.get $4
+      i32.const 1
+      i32.add
+      local.set $4
+      br $for-loop|1
+     end
+    end
+    local.get $5
+    i32.const 1
+    i32.add
+    local.set $5
+    br $for-loop|0
+   end
+  end
+ )
  (func $src/cloth/reset
   (local $0 i32)
   (local $1 i32)
@@ -1519,6 +1679,22 @@
   i32.const 1
   call $~lib/arraybuffer/ArrayBufferView#constructor
   global.set $src/cloth/bufIdx
+  f32.const 0.01666666753590107
+  global.set $src/cloth/curDt
+  i32.const 12
+  i32.const 6
+  call $~lib/rt/stub/__new
+  i32.const 9216
+  i32.const 2
+  call $~lib/arraybuffer/ArrayBufferView#constructor
+  global.set $src/cloth/bufAid
+  i32.const 12
+  i32.const 6
+  call $~lib/rt/stub/__new
+  i32.const 4
+  i32.const 2
+  call $~lib/arraybuffer/ArrayBufferView#constructor
+  global.set $src/cloth/bufAFirst
  )
  (func $~lib/math/NativeMath.cos (param $0 f64) (result f64)
   (local $1 f64)
@@ -1958,14 +2134,52 @@
  (func $src/cloth/uvPtr (result i32)
   global.get $src/cloth/UV
  )
+ (func $src/cloth/targetZ (result f32)
+  global.get $src/cloth/tgtZ
+ )
+ (func $src/cloth/targetY (result f32)
+  global.get $src/cloth/tgtY
+ )
+ (func $src/cloth/targetX (result f32)
+  global.get $src/cloth/tgtX
+ )
+ (func $src/cloth/targetR (result f32)
+  global.get $src/cloth/tgtR
+ )
+ (func $src/cloth/targetDist (result f32)
+  (local $0 f32)
+  global.get $src/cloth/ballPX
+  global.get $src/cloth/tgtX
+  f32.sub
+  local.tee $0
+  local.get $0
+  f32.mul
+  global.get $src/cloth/ballPY
+  global.get $src/cloth/tgtY
+  f32.sub
+  local.tee $0
+  local.get $0
+  f32.mul
+  f32.add
+  global.get $src/cloth/ballPZ
+  global.get $src/cloth/tgtZ
+  f32.sub
+  local.tee $0
+  local.get $0
+  f32.mul
+  f32.add
+  f64.promote_f32
+  f64.sqrt
+  f32.demote_f64
+ )
  (func $src/cloth/step (param $0 f32) (param $1 f32)
   (local $2 i32)
-  (local $3 i32)
+  (local $3 f32)
   (local $4 i32)
-  (local $5 f32)
+  (local $5 i32)
   (local $6 f32)
-  (local $7 i32)
-  (local $8 f32)
+  (local $7 f32)
+  (local $8 i32)
   (local $9 f32)
   (local $10 f32)
   (local $11 f32)
@@ -1975,13 +2189,14 @@
   (local $15 f32)
   (local $16 f32)
   (local $17 f32)
-  (local $18 i32)
+  (local $18 f32)
   (local $19 i32)
   (local $20 i32)
+  (local $21 i32)
   local.get $0
   local.get $0
   f32.mul
-  local.set $12
+  local.set $14
   global.get $src/cloth/windAmp
   local.get $1
   f32.const 0.6100000143051147
@@ -1994,9 +2209,13 @@
   f32.const 0.5
   f32.add
   f32.mul
-  local.set $13
+  local.set $9
   global.get $src/cloth/windFreq
-  local.set $14
+  local.set $15
+  local.get $0
+  global.set $src/cloth/curDt
+  i32.const 0
+  global.set $src/cloth/ballContacts
   loop $for-loop|0
    local.get $2
    global.get $src/cloth/NV
@@ -2014,46 +2233,46 @@
      local.get $2
      i32.const 4
      i32.shl
-     local.tee $3
+     local.tee $4
      global.get $src/cloth/Q
      i32.add
-     local.set $4
+     local.set $5
      global.get $src/cloth/P
-     local.get $3
+     local.get $4
      i32.add
-     local.tee $3
+     local.tee $4
      f32.load
-     local.set $15
-     local.get $3
+     local.set $10
+     local.get $4
      f32.load offset=4
-     local.set $8
-     local.get $13
+     local.set $11
+     local.get $9
      local.get $1
-     local.get $14
-     f32.mul
      local.get $15
+     f32.mul
+     local.get $10
      f32.const 1.899999976158142
      f32.mul
      f32.sub
-     local.get $3
+     local.get $4
      f32.load offset=8
-     local.tee $9
+     local.tee $12
      f32.const 1.350000023841858
      f32.mul
      f32.sub
-     local.tee $0
+     local.tee $3
      f64.promote_f32
      call $~lib/math/NativeMath.sin
      f32.demote_f64
      f32.mul
-     local.set $5
-     local.get $13
+     local.set $6
+     local.get $9
      f32.const 0.41999998688697815
      f32.mul
-     local.get $0
+     local.get $3
      f32.const 0.8299999833106995
      f32.mul
-     local.get $8
+     local.get $11
      f32.const 1.7000000476837158
      f32.mul
      f32.add
@@ -2061,14 +2280,14 @@
      call $~lib/math/NativeMath.cos
      f32.demote_f64
      f32.mul
-     local.set $6
-     local.get $13
+     local.set $7
+     local.get $9
      f32.const 0.6000000238418579
      f32.mul
-     local.get $0
+     local.get $3
      f32.const 1.3700000047683716
      f32.mul
-     local.get $9
+     local.get $12
      f32.const 2.0999999046325684
      f32.mul
      f32.add
@@ -2078,109 +2297,109 @@
      f32.mul
      global.get $src/cloth/gravity
      f32.sub
-     local.set $0
-     local.get $15
-     local.get $15
-     local.get $4
+     local.set $3
+     local.get $10
+     local.get $10
+     local.get $5
      f32.load
      f32.sub
      global.get $src/cloth/retention
      f32.mul
      f32.add
-     local.get $5
-     local.get $12
+     local.get $6
+     local.get $14
      f32.mul
      f32.add
-     local.tee $5
-     local.get $15
-     f32.sub
-     local.tee $10
+     local.tee $6
      local.get $10
+     f32.sub
+     local.tee $13
+     local.get $13
      f32.mul
-     local.get $8
-     local.get $8
-     local.get $4
+     local.get $11
+     local.get $11
+     local.get $5
      f32.load offset=4
      f32.sub
      global.get $src/cloth/retention
      f32.mul
      f32.add
-     local.get $0
-     local.get $12
+     local.get $3
+     local.get $14
      f32.mul
      f32.add
-     local.tee $0
-     local.get $8
-     f32.sub
-     local.tee $11
+     local.tee $3
      local.get $11
-     f32.mul
-     f32.add
-     local.get $9
-     local.get $9
-     local.get $4
-     f32.load offset=8
-     f32.sub
-     global.get $src/cloth/retention
-     f32.mul
-     f32.add
-     local.get $6
-     local.get $12
-     f32.mul
-     f32.add
-     local.tee $6
-     local.get $9
      f32.sub
      local.tee $16
      local.get $16
      f32.mul
      f32.add
+     local.get $12
+     local.get $12
+     local.get $5
+     f32.load offset=8
+     f32.sub
+     global.get $src/cloth/retention
+     f32.mul
+     f32.add
+     local.get $7
+     local.get $14
+     f32.mul
+     f32.add
+     local.tee $7
+     local.get $12
+     f32.sub
      local.tee $17
+     local.get $17
+     f32.mul
+     f32.add
+     local.tee $18
      f32.const 0.014399999752640724
      f32.gt
      if
-      local.get $15
       local.get $10
+      local.get $13
       f32.const 0.11999999731779099
-      local.get $17
+      local.get $18
       f64.promote_f32
       f64.sqrt
       f32.demote_f64
       f32.div
-      local.tee $0
-      f32.mul
-      f32.add
-      local.set $5
-      local.get $9
-      local.get $16
-      local.get $0
+      local.tee $3
       f32.mul
       f32.add
       local.set $6
-      local.get $8
-      local.get $11
-      local.get $0
+      local.get $12
+      local.get $17
+      local.get $3
       f32.mul
       f32.add
-      local.set $0
+      local.set $7
+      local.get $11
+      local.get $16
+      local.get $3
+      f32.mul
+      f32.add
+      local.set $3
      end
-     local.get $4
-     local.get $15
-     f32.store
-     local.get $4
-     local.get $8
-     f32.store offset=4
-     local.get $4
-     local.get $9
-     f32.store offset=8
-     local.get $3
      local.get $5
+     local.get $10
      f32.store
-     local.get $3
-     local.get $0
+     local.get $5
+     local.get $11
      f32.store offset=4
-     local.get $3
+     local.get $5
+     local.get $12
+     f32.store offset=8
+     local.get $4
      local.get $6
+     f32.store
+     local.get $4
+     local.get $3
+     f32.store offset=4
+     local.get $4
+     local.get $7
      f32.store offset=8
     end
     local.get $2
@@ -2190,199 +2409,211 @@
     br $for-loop|0
    end
   end
+  global.get $src/cloth/ballActive
+  if
+   local.get $0
+   f32.const 3
+   f32.div
+   local.set $0
+   i32.const 0
+   local.set $2
+   loop $for-loop|1
+    local.get $2
+    i32.const 3
+    i32.lt_s
+    if
+     global.get $src/cloth/ballVY
+     global.get $src/cloth/ballGrav
+     local.get $0
+     f32.mul
+     f32.sub
+     global.set $src/cloth/ballVY
+     global.get $src/cloth/ballVX
+     global.get $src/cloth/ballDrag
+     f32.mul
+     global.set $src/cloth/ballVX
+     global.get $src/cloth/ballVY
+     global.get $src/cloth/ballDrag
+     f32.mul
+     global.set $src/cloth/ballVY
+     global.get $src/cloth/ballVZ
+     global.get $src/cloth/ballDrag
+     f32.mul
+     global.set $src/cloth/ballVZ
+     global.get $src/cloth/ballVX
+     global.get $src/cloth/ballVX
+     f32.mul
+     global.get $src/cloth/ballVY
+     global.get $src/cloth/ballVY
+     f32.mul
+     f32.add
+     global.get $src/cloth/ballVZ
+     global.get $src/cloth/ballVZ
+     f32.mul
+     f32.add
+     local.tee $1
+     global.get $src/cloth/ballMaxV
+     global.get $src/cloth/ballMaxV
+     f32.mul
+     f32.gt
+     if
+      global.get $src/cloth/ballVX
+      global.get $src/cloth/ballMaxV
+      f32.const 1
+      local.get $1
+      f64.promote_f32
+      f64.sqrt
+      f32.demote_f64
+      f32.div
+      f32.mul
+      local.tee $1
+      f32.mul
+      global.set $src/cloth/ballVX
+      global.get $src/cloth/ballVY
+      local.get $1
+      f32.mul
+      global.set $src/cloth/ballVY
+      global.get $src/cloth/ballVZ
+      local.get $1
+      f32.mul
+      global.set $src/cloth/ballVZ
+     end
+     global.get $src/cloth/ballPX
+     global.get $src/cloth/ballVX
+     local.get $0
+     f32.mul
+     f32.add
+     global.set $src/cloth/ballPX
+     global.get $src/cloth/ballPY
+     global.get $src/cloth/ballVY
+     local.get $0
+     f32.mul
+     f32.add
+     global.set $src/cloth/ballPY
+     global.get $src/cloth/ballPZ
+     global.get $src/cloth/ballVZ
+     local.get $0
+     f32.mul
+     f32.add
+     global.set $src/cloth/ballPZ
+     global.get $src/cloth/floorY
+     global.get $src/cloth/ballRad
+     f32.add
+     local.tee $1
+     global.get $src/cloth/ballPY
+     f32.gt
+     if
+      local.get $1
+      global.set $src/cloth/ballPY
+      global.get $src/cloth/ballVY
+      f32.const 0
+      f32.lt
+      if
+       global.get $src/cloth/ballVY
+       f32.neg
+       global.get $src/cloth/ballRest
+       f32.mul
+       global.set $src/cloth/ballVY
+      end
+      global.get $src/cloth/ballVX
+      f32.const 0.8199999928474426
+      f32.mul
+      global.set $src/cloth/ballVX
+      global.get $src/cloth/ballVZ
+      f32.const 0.8199999928474426
+      f32.mul
+      global.set $src/cloth/ballVZ
+     end
+     global.get $src/cloth/ballPX
+     f32.const 9
+     f32.gt
+     if
+      f32.const 9
+      global.set $src/cloth/ballPX
+      global.get $src/cloth/ballVX
+      f32.const 0
+      f32.gt
+      if
+       global.get $src/cloth/ballVX
+       f32.const -0.30000001192092896
+       f32.mul
+       global.set $src/cloth/ballVX
+      end
+     end
+     global.get $src/cloth/ballPX
+     f32.const -9
+     f32.lt
+     if
+      f32.const -9
+      global.set $src/cloth/ballPX
+      global.get $src/cloth/ballVX
+      f32.const 0
+      f32.lt
+      if
+       global.get $src/cloth/ballVX
+       f32.const -0.30000001192092896
+       f32.mul
+       global.set $src/cloth/ballVX
+      end
+     end
+     global.get $src/cloth/ballPZ
+     f32.const 9
+     f32.gt
+     if
+      f32.const 9
+      global.set $src/cloth/ballPZ
+      global.get $src/cloth/ballVZ
+      f32.const 0
+      f32.gt
+      if
+       global.get $src/cloth/ballVZ
+       f32.const -0.30000001192092896
+       f32.mul
+       global.set $src/cloth/ballVZ
+      end
+     end
+     global.get $src/cloth/ballPZ
+     f32.const -9
+     f32.lt
+     if
+      f32.const -9
+      global.set $src/cloth/ballPZ
+      global.get $src/cloth/ballVZ
+      f32.const 0
+      f32.lt
+      if
+       global.get $src/cloth/ballVZ
+       f32.const -0.30000001192092896
+       f32.mul
+       global.set $src/cloth/ballVZ
+      end
+     end
+     local.get $2
+     i32.const 1
+     i32.add
+     local.set $2
+     br $for-loop|1
+    end
+   end
+  end
   i32.const 0
   global.set $src/cloth/hitCount
   i32.const 0
   global.set $src/cloth/floorHits
   global.get $src/cloth/nStruct
-  local.set $3
+  local.set $4
   global.get $src/cloth/nStruct
   global.get $src/cloth/nShear
   i32.add
-  local.set $4
-  loop $for-loop|1
-   local.get $7
+  local.set $5
+  loop $for-loop|2
+   local.get $8
    global.get $src/cloth/iterations
    i32.lt_s
    if
     global.get $src/cloth/kStruct
-    local.set $5
+    local.set $3
     i32.const 0
-    local.set $2
-    loop $for-loop|2
-     local.get $2
-     local.get $3
-     i32.lt_s
-     if
-      block $for-continue|2
-       global.get $src/cloth/IVM
-       local.get $2
-       i32.const 1
-       i32.shl
-       local.tee $18
-       global.get $src/cloth/CI
-       i32.add
-       i32.load16_u
-       local.tee $19
-       i32.const 2
-       i32.shl
-       i32.add
-       f32.load
-       local.tee $1
-       global.get $src/cloth/IVM
-       global.get $src/cloth/CJ
-       local.get $18
-       i32.add
-       i32.load16_u
-       local.tee $18
-       i32.const 2
-       i32.shl
-       i32.add
-       f32.load
-       local.tee $6
-       f32.add
-       f32.const 0
-       f32.eq
-       br_if $for-continue|2
-       global.get $src/cloth/P
-       local.get $18
-       i32.const 4
-       i32.shl
-       i32.add
-       local.tee $18
-       f32.load
-       global.get $src/cloth/P
-       local.get $19
-       i32.const 4
-       i32.shl
-       i32.add
-       local.tee $19
-       f32.load
-       local.tee $8
-       f32.sub
-       local.tee $9
-       local.get $9
-       f32.mul
-       local.get $18
-       f32.load offset=4
-       local.get $19
-       f32.load offset=4
-       local.tee $10
-       f32.sub
-       local.tee $11
-       local.get $11
-       f32.mul
-       f32.add
-       local.get $18
-       f32.load offset=8
-       local.get $19
-       f32.load offset=8
-       local.tee $12
-       f32.sub
-       local.tee $13
-       local.get $13
-       f32.mul
-       f32.add
-       local.tee $0
-       f32.const 9.999999960041972e-13
-       f32.lt
-       br_if $for-continue|2
-       local.get $0
-       f64.promote_f32
-       f64.sqrt
-       f32.demote_f64
-       local.tee $0
-       global.get $src/cloth/CR
-       local.get $2
-       i32.const 2
-       i32.shl
-       i32.add
-       f32.load
-       f32.sub
-       local.get $0
-       f32.div
-       local.get $5
-       f32.mul
-       local.set $0
-       local.get $1
-       local.get $6
-       f32.eq
-       if
-        local.get $0
-        f32.const 0.5
-        f32.mul
-        local.tee $1
-        local.set $0
-       else
-        local.get $1
-        f32.const 0
-        f32.eq
-        if
-         f32.const 0
-         local.set $1
-        else
-         local.get $0
-         local.set $1
-         f32.const 0
-         local.set $0
-        end
-       end
-       local.get $19
-       local.get $8
-       local.get $9
-       local.get $1
-       f32.mul
-       f32.add
-       f32.store
-       local.get $19
-       local.get $10
-       local.get $11
-       local.get $1
-       f32.mul
-       f32.add
-       f32.store offset=4
-       local.get $19
-       local.get $12
-       local.get $13
-       local.get $1
-       f32.mul
-       f32.add
-       f32.store offset=8
-       local.get $18
-       local.get $18
-       f32.load
-       local.get $9
-       local.get $0
-       f32.mul
-       f32.sub
-       f32.store
-       local.get $18
-       local.get $18
-       f32.load offset=4
-       local.get $11
-       local.get $0
-       f32.mul
-       f32.sub
-       f32.store offset=4
-       local.get $18
-       local.get $18
-       f32.load offset=8
-       local.get $13
-       local.get $0
-       f32.mul
-       f32.sub
-       f32.store offset=8
-      end
-      local.get $2
-      i32.const 1
-      i32.add
-      local.set $2
-      br $for-loop|2
-     end
-    end
-    global.get $src/cloth/kShear
-    local.set $5
-    local.get $3
     local.set $2
     loop $for-loop|3
      local.get $2
@@ -2394,11 +2625,11 @@
        local.get $2
        i32.const 1
        i32.shl
-       local.tee $18
+       local.tee $19
        global.get $src/cloth/CI
        i32.add
        i32.load16_u
-       local.tee $19
+       local.tee $20
        i32.const 2
        i32.shl
        i32.add
@@ -2406,10 +2637,10 @@
        local.tee $1
        global.get $src/cloth/IVM
        global.get $src/cloth/CJ
-       local.get $18
+       local.get $19
        i32.add
        i32.load16_u
-       local.tee $18
+       local.tee $19
        i32.const 2
        i32.shl
        i32.add
@@ -2420,27 +2651,27 @@
        f32.eq
        br_if $for-continue|3
        global.get $src/cloth/P
-       local.get $18
-       i32.const 4
-       i32.shl
-       i32.add
-       local.tee $18
-       f32.load
-       global.get $src/cloth/P
        local.get $19
        i32.const 4
        i32.shl
        i32.add
        local.tee $19
        f32.load
-       local.tee $8
+       global.get $src/cloth/P
+       local.get $20
+       i32.const 4
+       i32.shl
+       i32.add
+       local.tee $20
+       f32.load
+       local.tee $7
        f32.sub
        local.tee $9
        local.get $9
        f32.mul
-       local.get $18
-       f32.load offset=4
        local.get $19
+       f32.load offset=4
+       local.get $20
        f32.load offset=4
        local.tee $10
        f32.sub
@@ -2448,9 +2679,9 @@
        local.get $11
        f32.mul
        f32.add
-       local.get $18
-       f32.load offset=8
        local.get $19
+       f32.load offset=8
+       local.get $20
        f32.load offset=8
        local.tee $12
        f32.sub
@@ -2476,7 +2707,7 @@
        f32.sub
        local.get $0
        f32.div
-       local.get $5
+       local.get $3
        f32.mul
        local.set $0
        local.get $1
@@ -2502,45 +2733,45 @@
          local.set $0
         end
        end
-       local.get $19
-       local.get $8
+       local.get $20
+       local.get $7
        local.get $9
        local.get $1
        f32.mul
        f32.add
        f32.store
-       local.get $19
+       local.get $20
        local.get $10
        local.get $11
        local.get $1
        f32.mul
        f32.add
        f32.store offset=4
-       local.get $19
+       local.get $20
        local.get $12
        local.get $13
        local.get $1
        f32.mul
        f32.add
        f32.store offset=8
-       local.get $18
-       local.get $18
+       local.get $19
+       local.get $19
        f32.load
        local.get $9
        local.get $0
        f32.mul
        f32.sub
        f32.store
-       local.get $18
-       local.get $18
+       local.get $19
+       local.get $19
        f32.load offset=4
        local.get $11
        local.get $0
        f32.mul
        f32.sub
        f32.store offset=4
-       local.get $18
-       local.get $18
+       local.get $19
+       local.get $19
        f32.load offset=8
        local.get $13
        local.get $0
@@ -2555,15 +2786,13 @@
       br $for-loop|3
      end
     end
-    global.get $src/cloth/nCons
-    local.set $18
-    global.get $src/cloth/kBend
-    local.set $5
+    global.get $src/cloth/kShear
+    local.set $3
     local.get $4
     local.set $2
     loop $for-loop|4
      local.get $2
-     local.get $18
+     local.get $5
      i32.lt_s
      if
       block $for-continue|4
@@ -2610,7 +2839,7 @@
        i32.add
        local.tee $20
        f32.load
-       local.tee $8
+       local.tee $7
        f32.sub
        local.tee $9
        local.get $9
@@ -2653,7 +2882,7 @@
        f32.sub
        local.get $0
        f32.div
-       local.get $5
+       local.get $3
        f32.mul
        local.set $0
        local.get $1
@@ -2680,7 +2909,7 @@
         end
        end
        local.get $20
-       local.get $8
+       local.get $7
        local.get $9
        local.get $1
        f32.mul
@@ -2732,12 +2961,189 @@
       br $for-loop|4
      end
     end
-    local.get $7
+    global.get $src/cloth/nCons
+    local.set $19
+    global.get $src/cloth/kBend
+    local.set $3
+    local.get $5
+    local.set $2
+    loop $for-loop|5
+     local.get $2
+     local.get $19
+     i32.lt_s
+     if
+      block $for-continue|5
+       global.get $src/cloth/IVM
+       local.get $2
+       i32.const 1
+       i32.shl
+       local.tee $20
+       global.get $src/cloth/CI
+       i32.add
+       i32.load16_u
+       local.tee $21
+       i32.const 2
+       i32.shl
+       i32.add
+       f32.load
+       local.tee $1
+       global.get $src/cloth/IVM
+       global.get $src/cloth/CJ
+       local.get $20
+       i32.add
+       i32.load16_u
+       local.tee $20
+       i32.const 2
+       i32.shl
+       i32.add
+       f32.load
+       local.tee $6
+       f32.add
+       f32.const 0
+       f32.eq
+       br_if $for-continue|5
+       global.get $src/cloth/P
+       local.get $20
+       i32.const 4
+       i32.shl
+       i32.add
+       local.tee $20
+       f32.load
+       global.get $src/cloth/P
+       local.get $21
+       i32.const 4
+       i32.shl
+       i32.add
+       local.tee $21
+       f32.load
+       local.tee $7
+       f32.sub
+       local.tee $9
+       local.get $9
+       f32.mul
+       local.get $20
+       f32.load offset=4
+       local.get $21
+       f32.load offset=4
+       local.tee $10
+       f32.sub
+       local.tee $11
+       local.get $11
+       f32.mul
+       f32.add
+       local.get $20
+       f32.load offset=8
+       local.get $21
+       f32.load offset=8
+       local.tee $12
+       f32.sub
+       local.tee $13
+       local.get $13
+       f32.mul
+       f32.add
+       local.tee $0
+       f32.const 9.999999960041972e-13
+       f32.lt
+       br_if $for-continue|5
+       local.get $0
+       f64.promote_f32
+       f64.sqrt
+       f32.demote_f64
+       local.tee $0
+       global.get $src/cloth/CR
+       local.get $2
+       i32.const 2
+       i32.shl
+       i32.add
+       f32.load
+       f32.sub
+       local.get $0
+       f32.div
+       local.get $3
+       f32.mul
+       local.set $0
+       local.get $1
+       local.get $6
+       f32.eq
+       if
+        local.get $0
+        f32.const 0.5
+        f32.mul
+        local.tee $1
+        local.set $0
+       else
+        local.get $1
+        f32.const 0
+        f32.eq
+        if
+         f32.const 0
+         local.set $1
+        else
+         local.get $0
+         local.set $1
+         f32.const 0
+         local.set $0
+        end
+       end
+       local.get $21
+       local.get $7
+       local.get $9
+       local.get $1
+       f32.mul
+       f32.add
+       f32.store
+       local.get $21
+       local.get $10
+       local.get $11
+       local.get $1
+       f32.mul
+       f32.add
+       f32.store offset=4
+       local.get $21
+       local.get $12
+       local.get $13
+       local.get $1
+       f32.mul
+       f32.add
+       f32.store offset=8
+       local.get $20
+       local.get $20
+       f32.load
+       local.get $9
+       local.get $0
+       f32.mul
+       f32.sub
+       f32.store
+       local.get $20
+       local.get $20
+       f32.load offset=4
+       local.get $11
+       local.get $0
+       f32.mul
+       f32.sub
+       f32.store offset=4
+       local.get $20
+       local.get $20
+       f32.load offset=8
+       local.get $13
+       local.get $0
+       f32.mul
+       f32.sub
+       f32.store offset=8
+      end
+      local.get $2
+      i32.const 1
+      i32.add
+      local.set $2
+      br $for-loop|5
+     end
+    end
+    local.get $8
     global.get $src/cloth/iterations
     i32.const 1
     i32.sub
     i32.eq
-    local.set $18
+    local.set $19
     global.get $src/cloth/sphOn
     if
      global.get $src/cloth/sphX
@@ -2745,12 +3151,12 @@
      global.get $src/cloth/sphY
      local.set $1
      global.get $src/cloth/sphZ
-     local.set $5
+     local.set $3
      global.get $src/cloth/sphR
      local.tee $6
      local.get $6
      f32.mul
-     local.set $8
+     local.set $7
      i32.const 0
      local.set $2
      loop $for-loop|00
@@ -2768,20 +3174,20 @@
         f32.const 0
         f32.eq
         br_if $for-continue|01
-        local.get $8
+        local.get $7
         global.get $src/cloth/P
         local.get $2
         i32.const 4
         i32.shl
         i32.add
-        local.tee $19
+        local.tee $20
         f32.load
         local.get $0
         f32.sub
         local.tee $9
         local.get $9
         f32.mul
-        local.get $19
+        local.get $20
         f32.load offset=4
         local.get $1
         f32.sub
@@ -2789,9 +3195,9 @@
         local.get $10
         f32.mul
         f32.add
-        local.get $19
+        local.get $20
         f32.load offset=8
-        local.get $5
+        local.get $3
         f32.sub
         local.tee $11
         local.get $11
@@ -2808,13 +3214,13 @@
         f32.const 9.999999974752427e-07
         f32.lt
         if
-         local.get $19
+         local.get $20
          local.get $1
          local.get $6
          f32.add
          f32.store offset=4
         else
-         local.get $19
+         local.get $20
          local.get $0
          local.get $9
          local.get $6
@@ -2824,22 +3230,22 @@
          f32.mul
          f32.add
          f32.store
-         local.get $19
+         local.get $20
          local.get $1
          local.get $10
          local.get $9
          f32.mul
          f32.add
          f32.store offset=4
-         local.get $19
-         local.get $5
+         local.get $20
+         local.get $3
          local.get $11
          local.get $9
          f32.mul
          f32.add
          f32.store offset=8
         end
-        local.get $18
+        local.get $19
         if
          global.get $src/cloth/hitCount
          i32.const 1
@@ -2855,6 +3261,7 @@
       end
      end
     end
+    call $src/cloth/collideBall
     i32.const 0
     local.set $2
     loop $for-loop|02
@@ -2875,28 +3282,28 @@
        local.get $2
        i32.const 4
        i32.shl
-       local.tee $19
+       local.tee $20
        global.get $src/cloth/P
        i32.add
-       local.tee $20
+       local.tee $21
        f32.load offset=4
        f32.gt
        if
-        local.get $20
+        local.get $21
         f32.load
         local.set $0
-        local.get $20
+        local.get $21
         f32.load offset=8
         local.set $1
-        local.get $20
+        local.get $21
         global.get $src/cloth/floorY
         f32.store offset=4
-        local.get $20
+        local.get $21
         local.get $0
         global.get $src/cloth/Q
-        local.get $19
+        local.get $20
         i32.add
-        local.tee $19
+        local.tee $20
         f32.load
         local.get $0
         f32.sub
@@ -2904,9 +3311,9 @@
         f32.mul
         f32.add
         f32.store
-        local.get $20
+        local.get $21
         local.get $1
-        local.get $19
+        local.get $20
         f32.load offset=8
         local.get $1
         f32.sub
@@ -2914,7 +3321,7 @@
         f32.mul
         f32.add
         f32.store offset=8
-        local.get $18
+        local.get $19
         if
          global.get $src/cloth/floorHits
          i32.const 1
@@ -2930,14 +3337,29 @@
       br $for-loop|02
      end
     end
-    local.get $7
+    local.get $8
     i32.const 1
     i32.add
-    local.set $7
-    br $for-loop|1
+    local.set $8
+    br $for-loop|2
    end
   end
   call $src/cloth/computeNormals
+ )
+ (func $src/cloth/setTarget (param $0 f32) (param $1 f32) (param $2 f32) (param $3 f32)
+  local.get $0
+  global.set $src/cloth/tgtX
+  local.get $1
+  global.set $src/cloth/tgtY
+  local.get $2
+  global.set $src/cloth/tgtZ
+  f32.const 0.019999999552965164
+  local.get $3
+  local.get $3
+  f32.const 0.019999999552965164
+  f32.lt
+  select
+  global.set $src/cloth/tgtR
  )
  (func $src/cloth/setSphere (param $0 f32) (param $1 f32) (param $2 f32) (param $3 f32) (param $4 i32)
   local.get $0
@@ -3027,6 +3449,151 @@
   global.set $src/cloth/kBend
   local.get $8
   global.set $src/cloth/floorY
+ )
+ (func $src/cloth/setBallPhysics (param $0 f32) (param $1 f32) (param $2 f32) (param $3 f32)
+  local.get $0
+  global.set $src/cloth/ballGrav
+  f32.const 0
+  f32.const 1
+  local.get $1
+  local.get $1
+  f32.const 1
+  f32.gt
+  select
+  local.get $1
+  f32.const 0
+  f32.lt
+  select
+  global.set $src/cloth/ballDrag
+  f32.const 0
+  f32.const 0.949999988079071
+  local.get $2
+  local.get $2
+  f32.const 0.949999988079071
+  f32.gt
+  select
+  local.get $2
+  f32.const 0
+  f32.lt
+  select
+  global.set $src/cloth/ballRest
+  f32.const 0.5
+  local.get $3
+  local.get $3
+  f32.const 0.5
+  f32.lt
+  select
+  global.set $src/cloth/ballMaxV
+ )
+ (func $src/cloth/setBall (param $0 f32) (param $1 f32) (param $2 f32) (param $3 f32) (param $4 f32) (param $5 f32) (param $6 f32) (param $7 f32) (param $8 i32)
+  local.get $0
+  global.set $src/cloth/ballPX
+  local.get $1
+  global.set $src/cloth/ballPY
+  local.get $2
+  global.set $src/cloth/ballPZ
+  local.get $3
+  global.set $src/cloth/ballVX
+  local.get $4
+  global.set $src/cloth/ballVY
+  local.get $5
+  global.set $src/cloth/ballVZ
+  f32.const 0.019999999552965164
+  local.get $6
+  local.get $6
+  f32.const 0.019999999552965164
+  f32.lt
+  select
+  global.set $src/cloth/ballRad
+  f32.const 0.10000000149011612
+  local.get $7
+  local.get $7
+  f32.const 0.10000000149011612
+  f32.lt
+  select
+  global.set $src/cloth/ballMass
+  f32.const 1
+  global.get $src/cloth/ballMass
+  f32.div
+  global.set $src/cloth/ballInvM
+  local.get $8
+  global.set $src/cloth/ballActive
+  i32.const 0
+  global.set $src/cloth/ballContacts
+ )
+ (func $src/cloth/scored (result i32)
+  (local $0 f32)
+  global.get $src/cloth/ballActive
+  i32.eqz
+  if
+   i32.const 0
+   return
+  end
+  global.get $src/cloth/ballPX
+  global.get $src/cloth/tgtX
+  f32.sub
+  local.tee $0
+  local.get $0
+  f32.mul
+  global.get $src/cloth/ballPY
+  global.get $src/cloth/tgtY
+  f32.sub
+  local.tee $0
+  local.get $0
+  f32.mul
+  f32.add
+  global.get $src/cloth/ballPZ
+  global.get $src/cloth/tgtZ
+  f32.sub
+  local.tee $0
+  local.get $0
+  f32.mul
+  f32.add
+  f64.promote_f32
+  f64.sqrt
+  f32.demote_f64
+  global.get $src/cloth/tgtR
+  f32.const -9.999999974752427e-07
+  f32.add
+  f32.lt
+ )
+ (func $src/cloth/resetBall (param $0 f32) (param $1 f32) (param $2 f32)
+  local.get $0
+  global.set $src/cloth/ballPX
+  local.get $1
+  global.set $src/cloth/ballPY
+  local.get $2
+  global.set $src/cloth/ballPZ
+  f32.const 0
+  global.set $src/cloth/ballVX
+  f32.const 0
+  global.set $src/cloth/ballVY
+  f32.const 0
+  global.set $src/cloth/ballVZ
+  i32.const 0
+  global.set $src/cloth/ballContacts
+  i32.const 1
+  global.set $src/cloth/ballActive
+ )
+ (func $src/cloth/resetAnchors
+  (local $0 i32)
+  loop $for-loop|0
+   local.get $0
+   i32.const 4
+   i32.lt_s
+   if
+    local.get $0
+    f32.const 0
+    f32.const 0
+    f32.const 0
+    call $src/cloth/setAnchor
+    local.get $0
+    i32.const 1
+    i32.add
+    local.set $0
+    br $for-loop|0
+   end
+  end
  )
  (func $src/cloth/prevPtr (result i32)
   global.get $src/cloth/Q
@@ -3177,6 +3744,12 @@
   global.get $src/cloth/bufIdx
   i32.load offset=4
   global.set $src/cloth/IDX
+  global.get $src/cloth/bufAid
+  i32.load offset=4
+  global.set $src/cloth/AID
+  global.get $src/cloth/bufAFirst
+  i32.load offset=4
+  global.set $src/cloth/AFIRST
   i32.const 2
   i32.const 96
   local.get $0
@@ -3339,12 +3912,12 @@
    i32.gt_s
    if
     i32.const 0
-    local.set $1
+    local.set $4
     loop $for-loop|11
-     local.get $1
+     local.get $4
      i32.const 1
      i32.add
-     local.tee $4
+     local.tee $1
      global.get $src/cloth/COLS
      i32.lt_s
      if
@@ -3356,9 +3929,9 @@
       local.get $5
       global.get $src/cloth/COLS
       i32.mul
-      local.get $1
+      local.get $4
       i32.add
-      local.tee $1
+      local.tee $4
       i32.store16
       global.get $src/cloth/IDX
       local.get $0
@@ -3367,7 +3940,7 @@
       i32.const 1
       i32.shl
       i32.add
-      local.get $1
+      local.get $4
       global.get $src/cloth/COLS
       i32.add
       local.tee $8
@@ -3379,10 +3952,10 @@
       i32.const 1
       i32.shl
       i32.add
-      local.get $1
+      local.get $4
       i32.const 1
       i32.add
-      local.tee $1
+      local.tee $4
       i32.store16
       global.get $src/cloth/IDX
       local.get $0
@@ -3392,7 +3965,7 @@
       i32.const 1
       i32.shl
       i32.add
-      local.get $1
+      local.get $4
       i32.store16
       global.get $src/cloth/IDX
       local.get $0
@@ -3418,8 +3991,8 @@
       i32.const 3
       i32.add
       local.set $0
-      local.get $4
-      local.set $1
+      local.get $1
+      local.set $4
       br $for-loop|11
      end
     end
@@ -3432,6 +4005,128 @@
   end
   local.get $0
   global.set $src/cloth/NI
+  i32.const 0
+  local.set $0
+  loop $for-loop|02
+   local.get $0
+   i32.const 4
+   i32.lt_s
+   if
+    global.get $src/cloth/AFIRST
+    local.get $0
+    i32.const 2
+    i32.shl
+    i32.add
+    i32.const -1
+    i32.store
+    local.get $0
+    i32.const 1
+    i32.add
+    local.set $0
+    br $for-loop|02
+   end
+  end
+  i32.const 0
+  local.set $1
+  loop $for-loop|13
+   local.get $1
+   global.get $src/cloth/ROWS
+   i32.lt_s
+   if
+    i32.const 0
+    local.set $4
+    loop $for-loop|2
+     local.get $4
+     global.get $src/cloth/COLS
+     i32.lt_s
+     if
+      local.get $1
+      global.get $src/cloth/COLS
+      i32.mul
+      local.get $4
+      i32.add
+      local.set $0
+      i32.const -1
+      local.set $5
+      local.get $1
+      i32.const 2
+      i32.lt_s
+      local.tee $8
+      local.get $1
+      global.get $src/cloth/ROWS
+      i32.const 2
+      i32.sub
+      i32.ge_s
+      local.get $8
+      select
+      i32.const 0
+      local.get $4
+      i32.const 2
+      i32.lt_s
+      local.tee $8
+      if (result i32)
+       local.get $8
+      else
+       local.get $4
+       global.get $src/cloth/COLS
+       i32.const 2
+       i32.sub
+       i32.ge_s
+      end
+      select
+      if
+       local.get $1
+       i32.const 2
+       i32.ge_s
+       i32.const 1
+       i32.shl
+       local.get $4
+       i32.const 2
+       i32.ge_s
+       i32.add
+       local.tee $5
+       i32.const 4
+       i32.ge_u
+       if
+        i32.const 3
+        local.set $5
+       end
+       global.get $src/cloth/AFIRST
+       local.get $5
+       i32.const 2
+       i32.shl
+       i32.add
+       local.tee $8
+       i32.load
+       i32.const 0
+       i32.lt_s
+       if
+        local.get $8
+        local.get $0
+        i32.store
+       end
+      end
+      global.get $src/cloth/AID
+      local.get $0
+      i32.const 2
+      i32.shl
+      i32.add
+      local.get $5
+      i32.store
+      local.get $4
+      i32.const 1
+      i32.add
+      local.set $4
+      br $for-loop|2
+     end
+    end
+    local.get $1
+    i32.const 1
+    i32.add
+    local.set $1
+    br $for-loop|13
+   end
+  end
   global.get $src/cloth/pinMode
   call $src/cloth/setPinMode
  )
@@ -3611,6 +4306,383 @@
   f64.convert_i32_s
   f64.div
   f32.demote_f64
+ )
+ (func $src/cloth/collideBall
+  (local $0 f32)
+  (local $1 i32)
+  (local $2 f32)
+  (local $3 f32)
+  (local $4 f32)
+  (local $5 f32)
+  (local $6 f32)
+  (local $7 f32)
+  (local $8 f32)
+  (local $9 f32)
+  (local $10 f32)
+  (local $11 f32)
+  (local $12 f32)
+  (local $13 f32)
+  (local $14 f32)
+  (local $15 f32)
+  (local $16 i32)
+  (local $17 f32)
+  (local $18 f32)
+  (local $19 f32)
+  (local $20 f32)
+  (local $21 f32)
+  (local $22 f32)
+  global.get $src/cloth/ballActive
+  i32.eqz
+  if
+   return
+  end
+  global.get $src/cloth/ballPX
+  local.set $3
+  global.get $src/cloth/ballPY
+  local.set $4
+  global.get $src/cloth/ballPZ
+  local.set $5
+  global.get $src/cloth/ballRad
+  f32.const 0.006000000052154064
+  f32.add
+  local.tee $9
+  local.get $9
+  f32.mul
+  local.set $11
+  global.get $src/cloth/curDt
+  f32.const 9.999999974752427e-07
+  f32.gt
+  if (result f32)
+   f32.const 1
+   global.get $src/cloth/curDt
+   f32.div
+  else
+   f32.const 60
+  end
+  global.get $src/cloth/ballRest
+  f32.const 1
+  f32.add
+  f32.mul
+  local.set $10
+  global.get $src/cloth/ballInvM
+  global.get $src/cloth/ballInvM
+  f32.const 1
+  f32.add
+  local.tee $2
+  f32.div
+  local.set $12
+  f32.const 1
+  local.get $2
+  f32.div
+  local.set $13
+  loop $for-loop|0
+   local.get $1
+   global.get $src/cloth/NV
+   i32.lt_s
+   if
+    block $for-continue|0
+     global.get $src/cloth/IVM
+     local.get $1
+     i32.const 2
+     i32.shl
+     i32.add
+     f32.load
+     f32.const 0
+     f32.eq
+     br_if $for-continue|0
+     local.get $11
+     global.get $src/cloth/P
+     local.get $1
+     i32.const 4
+     i32.shl
+     i32.add
+     local.tee $16
+     f32.load
+     local.tee $17
+     local.get $3
+     f32.sub
+     local.tee $2
+     local.get $2
+     f32.mul
+     local.get $16
+     f32.load offset=4
+     local.tee $14
+     local.get $4
+     f32.sub
+     local.tee $15
+     local.get $15
+     f32.mul
+     f32.add
+     local.get $16
+     f32.load offset=8
+     local.tee $18
+     local.get $5
+     f32.sub
+     local.tee $19
+     local.get $19
+     f32.mul
+     f32.add
+     local.tee $6
+     f32.le
+     br_if $for-continue|0
+     local.get $6
+     f64.promote_f32
+     f64.sqrt
+     f32.demote_f64
+     local.tee $20
+     f32.const 9.999999974752427e-07
+     f32.lt
+     if (result f32)
+      f32.const 0
+      local.set $6
+      f32.const 0
+      local.set $2
+      f32.const 1
+     else
+      local.get $2
+      f32.const 1
+      local.get $20
+      f32.div
+      local.tee $21
+      f32.mul
+      local.set $6
+      local.get $19
+      local.get $21
+      f32.mul
+      local.set $2
+      local.get $15
+      local.get $21
+      f32.mul
+     end
+     local.set $19
+     local.get $16
+     local.get $17
+     local.get $6
+     local.get $9
+     local.get $9
+     local.get $20
+     f32.sub
+     local.get $20
+     f32.const 9.999999974752427e-07
+     f32.lt
+     select
+     local.tee $20
+     local.get $13
+     f32.mul
+     local.tee $21
+     f32.mul
+     f32.add
+     local.tee $15
+     f32.store
+     local.get $16
+     local.get $14
+     local.get $19
+     local.get $21
+     f32.mul
+     f32.add
+     local.tee $22
+     f32.store offset=4
+     local.get $16
+     local.get $18
+     local.get $2
+     local.get $21
+     f32.mul
+     f32.add
+     local.tee $21
+     f32.store offset=8
+     global.get $src/cloth/Q
+     local.get $1
+     i32.const 4
+     i32.shl
+     i32.add
+     local.tee $16
+     local.get $16
+     f32.load
+     local.get $15
+     local.get $17
+     f32.sub
+     f32.const 0.8999999761581421
+     f32.mul
+     f32.add
+     f32.store
+     local.get $16
+     local.get $16
+     f32.load offset=4
+     local.get $22
+     local.get $14
+     f32.sub
+     f32.const 0.8999999761581421
+     f32.mul
+     f32.add
+     f32.store offset=4
+     local.get $16
+     local.get $16
+     f32.load offset=8
+     local.get $21
+     local.get $18
+     f32.sub
+     f32.const 0.8999999761581421
+     f32.mul
+     f32.add
+     f32.store offset=8
+     local.get $3
+     local.get $6
+     local.get $20
+     local.get $12
+     f32.mul
+     local.tee $14
+     f32.mul
+     local.tee $15
+     f32.sub
+     local.set $3
+     local.get $4
+     local.get $19
+     local.get $14
+     f32.mul
+     local.tee $17
+     f32.sub
+     local.set $4
+     local.get $5
+     local.get $2
+     local.get $14
+     f32.mul
+     local.tee $14
+     f32.sub
+     local.set $5
+     global.get $src/cloth/ballVX
+     local.get $15
+     local.get $10
+     f32.mul
+     f32.sub
+     global.set $src/cloth/ballVX
+     global.get $src/cloth/ballVY
+     local.get $17
+     local.get $10
+     f32.mul
+     f32.sub
+     global.set $src/cloth/ballVY
+     global.get $src/cloth/ballVZ
+     local.get $14
+     local.get $10
+     f32.mul
+     f32.sub
+     global.set $src/cloth/ballVZ
+     local.get $0
+     local.get $6
+     f32.add
+     local.set $0
+     local.get $7
+     local.get $19
+     f32.add
+     local.set $7
+     local.get $8
+     local.get $2
+     f32.add
+     local.set $8
+     global.get $src/cloth/ballContacts
+     i32.const 1
+     i32.add
+     global.set $src/cloth/ballContacts
+    end
+    local.get $1
+    i32.const 1
+    i32.add
+    local.set $1
+    br $for-loop|0
+   end
+  end
+  local.get $3
+  global.set $src/cloth/ballPX
+  local.get $4
+  global.set $src/cloth/ballPY
+  local.get $5
+  global.set $src/cloth/ballPZ
+  global.get $src/cloth/ballContacts
+  i32.const 0
+  i32.gt_s
+  if
+   local.get $0
+   local.get $0
+   f32.mul
+   local.get $7
+   local.get $7
+   f32.mul
+   f32.add
+   local.get $8
+   local.get $8
+   f32.mul
+   f32.add
+   f64.promote_f32
+   f64.sqrt
+   f32.demote_f64
+   local.tee $2
+   f32.const 9.999999974752427e-07
+   f32.gt
+   if
+    global.get $src/cloth/ballVX
+    local.get $0
+    f32.const 1
+    local.get $2
+    f32.div
+    local.tee $0
+    f32.mul
+    local.tee $2
+    f32.mul
+    global.get $src/cloth/ballVY
+    local.get $7
+    local.get $0
+    f32.mul
+    local.tee $3
+    f32.mul
+    f32.add
+    global.get $src/cloth/ballVZ
+    local.get $8
+    local.get $0
+    f32.mul
+    local.tee $0
+    f32.mul
+    f32.add
+    local.tee $4
+    f32.const 0.6000000238418579
+    f32.lt
+    local.get $4
+    f32.const -0.6000000238418579
+    f32.gt
+    i32.and
+    if
+     global.get $src/cloth/ballVX
+     global.get $src/cloth/ballVX
+     local.get $2
+     local.get $4
+     f32.mul
+     f32.sub
+     f32.const 0.550000011920929
+     f32.mul
+     f32.sub
+     global.set $src/cloth/ballVX
+     global.get $src/cloth/ballVY
+     global.get $src/cloth/ballVY
+     local.get $3
+     local.get $4
+     f32.mul
+     f32.sub
+     f32.const 0.550000011920929
+     f32.mul
+     f32.sub
+     global.set $src/cloth/ballVY
+     global.get $src/cloth/ballVZ
+     global.get $src/cloth/ballVZ
+     local.get $0
+     local.get $4
+     f32.mul
+     f32.sub
+     f32.const 0.550000011920929
+     f32.mul
+     f32.sub
+     global.set $src/cloth/ballVZ
+    end
+   end
+  end
  )
  (func $src/cloth/buildConstraints
   (local $0 i32)
@@ -3952,5 +5024,164 @@
   end
   local.get $0
   global.set $src/cloth/nCons
+ )
+ (func $src/cloth/ballZ (result f32)
+  global.get $src/cloth/ballPZ
+ )
+ (func $src/cloth/ballY (result f32)
+  global.get $src/cloth/ballPY
+ )
+ (func $src/cloth/ballX (result f32)
+  global.get $src/cloth/ballPX
+ )
+ (func $src/cloth/ballVelZ (result f32)
+  global.get $src/cloth/ballVZ
+ )
+ (func $src/cloth/ballVelY (result f32)
+  global.get $src/cloth/ballVY
+ )
+ (func $src/cloth/ballVelX (result f32)
+  global.get $src/cloth/ballVX
+ )
+ (func $src/cloth/ballSpeed (result f32)
+  global.get $src/cloth/ballVX
+  global.get $src/cloth/ballVX
+  f32.mul
+  global.get $src/cloth/ballVY
+  global.get $src/cloth/ballVY
+  f32.mul
+  f32.add
+  global.get $src/cloth/ballVZ
+  global.get $src/cloth/ballVZ
+  f32.mul
+  f32.add
+  f64.promote_f32
+  f64.sqrt
+  f32.demote_f64
+ )
+ (func $src/cloth/ballRadius (result f32)
+  global.get $src/cloth/ballRad
+ )
+ (func $src/cloth/ballOn (result i32)
+  global.get $src/cloth/ballActive
+ )
+ (func $src/cloth/ballKinetic (result f32)
+  global.get $src/cloth/ballMass
+  f32.const 0.5
+  f32.mul
+  global.get $src/cloth/ballVX
+  global.get $src/cloth/ballVX
+  f32.mul
+  global.get $src/cloth/ballVY
+  global.get $src/cloth/ballVY
+  f32.mul
+  f32.add
+  global.get $src/cloth/ballVZ
+  global.get $src/cloth/ballVZ
+  f32.mul
+  f32.add
+  f32.mul
+ )
+ (func $src/cloth/ballContactCount (result i32)
+  global.get $src/cloth/ballContacts
+ )
+ (func $src/cloth/anchorZ (param $0 i32) (result f32)
+  local.get $0
+  i32.const 0
+  i32.lt_s
+  local.get $0
+  i32.const 4
+  i32.ge_s
+  i32.or
+  if
+   f32.const 0
+   return
+  end
+  global.get $src/cloth/AFIRST
+  local.get $0
+  i32.const 2
+  i32.shl
+  i32.add
+  i32.load
+  local.tee $0
+  i32.const 0
+  i32.lt_s
+  if (result f32)
+   f32.const 0
+  else
+   global.get $src/cloth/P
+   local.get $0
+   i32.const 4
+   i32.shl
+   i32.add
+   f32.load offset=8
+  end
+ )
+ (func $src/cloth/anchorY (param $0 i32) (result f32)
+  local.get $0
+  i32.const 0
+  i32.lt_s
+  local.get $0
+  i32.const 4
+  i32.ge_s
+  i32.or
+  if
+   f32.const 0
+   return
+  end
+  global.get $src/cloth/AFIRST
+  local.get $0
+  i32.const 2
+  i32.shl
+  i32.add
+  i32.load
+  local.tee $0
+  i32.const 0
+  i32.lt_s
+  if (result f32)
+   f32.const 0
+  else
+   global.get $src/cloth/P
+   local.get $0
+   i32.const 4
+   i32.shl
+   i32.add
+   f32.load offset=4
+  end
+ )
+ (func $src/cloth/anchorX (param $0 i32) (result f32)
+  local.get $0
+  i32.const 0
+  i32.lt_s
+  local.get $0
+  i32.const 4
+  i32.ge_s
+  i32.or
+  if
+   f32.const 0
+   return
+  end
+  global.get $src/cloth/AFIRST
+  local.get $0
+  i32.const 2
+  i32.shl
+  i32.add
+  i32.load
+  local.tee $0
+  i32.const 0
+  i32.lt_s
+  if (result f32)
+   f32.const 0
+  else
+   global.get $src/cloth/P
+   local.get $0
+   i32.const 4
+   i32.shl
+   i32.add
+   f32.load
+  end
+ )
+ (func $src/cloth/anchorCount (result i32)
+  i32.const 4
  )
 )
